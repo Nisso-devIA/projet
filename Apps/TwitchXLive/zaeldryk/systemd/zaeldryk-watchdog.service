@@ -1,0 +1,11 @@
+[Unit]
+Description=ZAELDRYK service watchdog (Discord alerts)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk
+Environment=ZAEL_ROOT=/home/ubuntu/zaeldryk
+ExecStart=/home/ubuntu/zaeldryk/tools/service-watchdog.sh

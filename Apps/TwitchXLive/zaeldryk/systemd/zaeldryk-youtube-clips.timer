@@ -1,0 +1,11 @@
+[Unit]
+Description=Run youtube-clips worker every 30 minutes
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=30min
+AccuracySec=2min
+Unit=zaeldryk-youtube-clips.service
+
+[Install]
+WantedBy=timers.target

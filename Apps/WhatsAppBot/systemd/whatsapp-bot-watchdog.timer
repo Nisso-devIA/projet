@@ -1,0 +1,11 @@
+[Unit]
+Description=Check WhatsApp Bot every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Unit=whatsapp-bot-watchdog.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,6 @@
+# m h  dom mon dow   command
+# Maintenance only — live detection runs via zaeldryk-live.service
+0 */3 * * * /home/ubuntu/zaeldryk/twitch/refresh-token.sh
+*/15 * * * * /home/ubuntu/zaeldryk/twitch/delete-offline-vods.sh
+*/15 * * * * /home/ubuntu/zaeldryk/twitch/clear-chat-offline.sh
+0 */2 * * * /home/ubuntu/zaeldryk/twitch/reset-offline.sh

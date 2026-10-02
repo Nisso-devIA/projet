@@ -1,0 +1,31 @@
+---
+description: Réduire la conso crédits Agent pour rester viable sur Cursor Pro ($20)
+alwaysApply: true
+---
+
+# Crédits Cursor — mode Pro
+
+Objectif : sessions Agent courtes et ciblées. Le VPS et les bots tournent sans Cursor ; ne pas re-découvrir tout le stack à chaque chat.
+
+## Avant d’agir
+
+- Une demande = un scope. Ne pas élargir à « optimiser tout » ou explorer d’autres apps.
+- Si le chemin / service / IP est déjà dans le message, GUIDE-ZAELDRYK.md, ou le chat : ne pas relancer un inventaire SSH ni un explore subagent.
+- Préférer 1–3 appels outils ciblés plutôt que Task/explore « very thorough ».
+
+## Outils
+
+- SSH : une seule commande regroupée (`systemctl` + `pm2` + chemins), pas une série de SSH.
+- Grep/Glob avant Read large ; Read avec offset/limit sur gros fichiers.
+- Pas de canvas, pas de doc markdown, sauf demande explicite.
+- Ne pas relancer healthcheck / inventaire VPS « pour vérifier » si rien n’a changé dans la session.
+
+## Modèles / profondeur
+
+- Fix local simple (1 fichier, typo, CSS) : rester minimal, pas d’architecture ni de refactor.
+- Jobs VPS : plan court → backup horodaté → patch → vérif. Une session = un changement.
+
+## Après la tâche
+
+- Réponse courte (résultat + chemins). Pas de récap long ni de « prochaines étapes » non demandées.
+- Ne pas proposer Ultra / Pro+ / audits annexes sauf si l’utilisateur en parle.

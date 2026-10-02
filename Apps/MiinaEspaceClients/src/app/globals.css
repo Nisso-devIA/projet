@@ -1,0 +1,200 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Cormorant Garamond", Georgia, serif;
+  --font-script: "Great Vibes", cursive;
+  --font-sans: Manrope, ui-sans-serif, system-ui, sans-serif;
+  --color-ink: #3b2a24;
+  --color-ink-soft: #6a534a;
+  --color-bg: #faf2e6;
+  --color-card: #dcc2a6;
+  --color-accent: #8b5a3c;
+  --color-accent-strong: #6f452e;
+  --color-danger: #b42318;
+}
+
+@layer base {
+  html {
+    min-height: 100%;
+  }
+
+  body {
+    min-height: 100dvh;
+    margin: 0;
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    background-color: var(--color-bg);
+    background-image: url("/brand/site-bg.png");
+    background-repeat: no-repeat;
+    background-position: center center;
+    background-size: cover;
+    background-attachment: fixed;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
+  }
+}
+
+/* Flipbook reader */
+.flip-reader {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 12px 20px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.flip-reader-stage {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  min-height: min(72dvh, 860px);
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 45%, #4a3f35 0%, transparent 70%),
+    radial-gradient(ellipse at center, #2a241e 0%, #12100e 75%);
+  box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.35);
+}
+
+.flip-reader-stage.is-zoomed {
+  cursor: grab;
+}
+
+.flip-zoom-layer {
+  transform-origin: center center;
+  will-change: transform;
+  display: grid;
+  place-items: center;
+  width: 100%;
+}
+
+.flip-book-host {
+  width: auto;
+  max-width: 100%;
+  touch-action: none;
+  margin: 0 auto;
+  filter: drop-shadow(0 22px 48px rgba(0, 0, 0, 0.55))
+    drop-shadow(0 4px 12px rgba(0, 0, 0, 0.35));
+}
+
+/* Chromebook only : filter+transform → flou GPU ; overrides scoped */
+.flip-reader.is-chromebook .flip-book-host {
+  filter: none;
+}
+.flip-reader.is-chromebook .flip-zoom-layer {
+  will-change: auto;
+}
+
+.flip-book-host.is-short-flip {
+  max-width: min(440px, 100%);
+}
+
+.flip-book-host.is-landscape-flip {
+  max-width: min(1100px, 100%);
+}
+
+.flip-book-inner {
+  margin: 0 auto;
+}
+
+.flip-html-page {
+  background: #fff;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+.flip-html-page img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  image-rendering: auto;
+  -ms-interpolation-mode: bicubic;
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+  background: #fff;
+}
+
+.flip-reader-status {
+  position: absolute;
+  z-index: 2;
+  margin: 0;
+  text-align: center;
+  color: rgba(244, 236, 225, 0.65);
+}
+
+.flip-reader-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.flip-reader-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.flip-btn {
+  min-height: 44px;
+  min-width: 48px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(244, 236, 225, 0.22);
+  background: transparent;
+  color: #f4ece1;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.flip-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.flip-btn:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.flip-zoom-reset {
+  min-width: 5.5rem;
+}
+
+.flip-reader-page {
+  margin: 0;
+  min-width: 7rem;
+  text-align: center;
+  font-size: 0.92rem;
+  color: rgba(244, 236, 225, 0.6);
+}
+
+.flip-reader-note {
+  margin: 10px 0 0;
+  text-align: center;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(244, 236, 225, 0.45);
+}
+
+@media (max-width: 700px) {
+  .flip-reader-controls {
+    flex-direction: column;
+  }
+}

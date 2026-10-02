@@ -1,0 +1,74 @@
+# Dependencies & build
+node_modules/
+.pnpm-store/
+.next/
+.nuxt/
+.output/
+dist/
+build/
+out/
+.turbo/
+.vercel/
+.cache/
+*.tsbuildinfo
+
+# Secrets & credentials (keep *.example)
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.ppk
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+**/credentials.json
+**/secrets.json
+
+# Explicit secret paths in this workspace
+vps to/
+backup-local/
+**/.vercel-pull/
+**/twitch.env
+**/live.env
+**/news.env
+**/schedule.env
+**/games-prompt.env
+**/discord.env
+**/freegames.env
+
+# Large / local-only artefacts
+backups/
+contenu-tiktok/
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.zip
+*.7z
+*.rar
+*.iso
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+.idea/
+.vscode/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# Python / misc
+__pycache__/
+.venv/
+venv/
+*.pyc
+.pytest_cache/
+
+# Nested repo metadata (kept locally, not pushed)
+**/.git.bak-monorepo/

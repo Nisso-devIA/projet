@@ -1,0 +1,10 @@
+[Unit]
+Description=ZAELDRYK free games announcements (Epic, PSN, stores)
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk
+Environment=ZAEL_ROOT=/home/ubuntu/zaeldryk
+ExecStart=/home/ubuntu/zaeldryk/discord/run-free-games-post.sh

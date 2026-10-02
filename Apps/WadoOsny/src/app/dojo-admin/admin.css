@@ -1,0 +1,147 @@
+.admin-root {
+  min-height: 100vh;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-manrope), system-ui, sans-serif;
+}
+
+.admin-wrap {
+  margin: 0 auto;
+  max-width: 56rem;
+  padding: 2rem 1.25rem 4rem;
+}
+
+.admin-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-nav a {
+  font-size: 0.875rem;
+  color: var(--paper-muted);
+  text-decoration: none;
+}
+
+.admin-nav a:hover,
+.admin-nav a[aria-current="page"] {
+  color: var(--gold);
+}
+
+.admin-card {
+  border: 1px solid var(--line);
+  background: var(--ink-soft);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.admin-card h2,
+.admin-card h3 {
+  font-family: var(--font-syne), sans-serif;
+  margin: 0 0 0.75rem;
+}
+
+.admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+}
+
+.admin-field label {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--paper-muted);
+}
+
+.admin-field input,
+.admin-field textarea,
+.admin-field select {
+  background: var(--ink);
+  border: 1px solid var(--line);
+  color: var(--paper);
+  padding: 0.65rem 0.75rem;
+  border-radius: 2px;
+  font: inherit;
+}
+
+.admin-field textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.admin-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+  padding: 0.55rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: var(--crimson);
+  color: var(--paper);
+}
+
+.admin-btn:hover {
+  background: var(--crimson-bright);
+}
+
+.admin-btn-ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--paper-muted);
+}
+
+.admin-btn-ghost:hover {
+  color: var(--paper);
+  border-color: var(--paper-muted);
+}
+
+.admin-error {
+  color: #f0a0a0;
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.admin-ok {
+  color: var(--gold);
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.admin-meta {
+  font-size: 0.8rem;
+  color: var(--paper-muted);
+}
+
+.admin-grid-2 {
+  display: grid;
+  gap: 0.85rem;
+}
+
+@media (min-width: 720px) {
+  .admin-grid-2 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.admin-thumb {
+  width: 4.5rem;
+  height: 4.5rem;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: var(--ink-lift);
+}

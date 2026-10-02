@@ -1,0 +1,11 @@
+[Unit]
+Description=Discord server dump every 2 hours
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=2h
+AccuracySec=5min
+Unit=zaeldryk-discord-dump.service
+
+[Install]
+WantedBy=timers.target

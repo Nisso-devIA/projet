@@ -1,0 +1,68 @@
+# /etc/systemd/system/twitch-offline.service
+[Unit]
+Description=Twitch Offline Ending Stream
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+ExecStart=/usr/bin/ffmpeg -re -stream_loop -1 -i /home/ubuntu/thanks.mp4 -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k -pix_fmt yuv420p -g 60 -c:a aac -b:a 128k -f flv rtmp://live.twitch.tv/app/live_426411773_RtFv7Zx2ws5mJNzKY3BSdMobI6ZRJh
+ExecStartPost=/bin/bash -c '/home/ubuntu/clear-chat-offline.sh &'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/offline-chatbot.service
+[Unit]
+Description=ZAELDRYK Offline Chatbot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+ExecStart=/usr/bin/python3 /home/ubuntu/offline-chatbot.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ubuntu/offline-chatbot.log
+StandardError=append:/home/ubuntu/offline-chatbot.log
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/moderation-bot.service
+[Unit]
+Description=ZAELDRYK Moderation Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+ExecStart=/usr/bin/python3 /home/ubuntu/moderation-bot.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ubuntu/moderation-bot.log
+StandardError=append:/home/ubuntu/moderation-bot.log
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/zaeldryk-discord.service
+[Unit]
+Description=ZAELDRYK Discord Bot (Verification + Logs + Welcome)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+ExecStart=/usr/bin/python3 /home/ubuntu/zaeldryk-discord-bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.targetsudo systemctl stop verification-bot.service logs-bot.service

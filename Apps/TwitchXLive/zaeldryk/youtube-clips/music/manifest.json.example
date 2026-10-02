@@ -1,0 +1,9 @@
+[
+  {
+    "file": "example-track.mp3",
+    "title": "Song Name",
+    "artist": "Artist Name",
+    "credit_url": "https://ncs.io/SongName",
+    "license": "NCS"
+  }
+]

@@ -1,0 +1,1 @@
+ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl start twitch-offline.service, /bin/systemctl stop twitch-offline.service, /bin/systemctl restart twitch-offline.service

@@ -1,0 +1,15 @@
+[Unit]
+Description=Twitch Offline Ending Stream
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+ExecStart=/bin/bash /home/ubuntu/zaeldryk/twitch/start-offline-stream.sh
+ExecStartPost=/bin/bash -c '/home/ubuntu/zaeldryk/twitch/clear-chat-offline.sh &'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

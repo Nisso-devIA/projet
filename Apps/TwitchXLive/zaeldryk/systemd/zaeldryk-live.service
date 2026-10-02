@@ -1,0 +1,17 @@
+[Unit]
+Description=ZAELDRYK live orchestrator (Twitch mode + chat + X)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk
+Environment=ZAEL_ROOT=/home/ubuntu/zaeldryk
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash /home/ubuntu/zaeldryk/twitch/live-orchestrator.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

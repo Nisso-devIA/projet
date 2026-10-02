@@ -1,0 +1,12 @@
+[Unit]
+Description=Sync Twitch stream schedule to Discord events
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk
+Environment=ZAEL_ROOT=/home/ubuntu/zaeldryk
+ExecStart=/home/ubuntu/zaeldryk/discord/run-schedule-sync.sh
+
+[Install]
+WantedBy=multi-user.target

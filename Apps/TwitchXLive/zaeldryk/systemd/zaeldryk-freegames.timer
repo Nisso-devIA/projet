@@ -1,0 +1,12 @@
+[Unit]
+Description=Check free games on stores (daily — Epic jeudi, PSN mensuel, etc.)
+
+[Timer]
+OnBootSec=15min
+OnCalendar=*-*-* 17:00:00
+OnCalendar=*-*-* 09:00:00
+AccuracySec=10min
+Unit=zaeldryk-freegames.service
+
+[Install]
+WantedBy=timers.target

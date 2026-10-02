@@ -1,0 +1,11 @@
+[Unit]
+Description=Post games engagement prompt daily at 18:00 Paris (16:00 UTC summer)
+
+[Timer]
+OnCalendar=*-*-* 16:00:00
+AccuracySec=5min
+Persistent=true
+Unit=zaeldryk-games-prompt.service
+
+[Install]
+WantedBy=timers.target

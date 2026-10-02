@@ -1,0 +1,11 @@
+[Unit]
+Description=Run ZAELDRYK service watchdog every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Unit=zaeldryk-watchdog.service
+
+[Install]
+WantedBy=timers.target

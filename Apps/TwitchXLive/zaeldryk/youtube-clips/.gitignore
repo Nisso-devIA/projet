@@ -1,0 +1,8 @@
+work/**
+!work/.gitkeep
+music/*.mp3
+music/*.wav
+music/*.flac
+music/manifest.json
+__pycache__/
+*.pyc

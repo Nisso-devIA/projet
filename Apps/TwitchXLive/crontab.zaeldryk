@@ -1,0 +1,25 @@
+# m h  dom mon dow   command
+*/5 * * * * /home/ubuntu/offline-watchdog.sh
+* * * * * /home/ubuntu/smart-live-announce.sh
+* * * * * sleep 10; /home/ubuntu/smart-live-announce.sh
+* * * * * sleep 20; /home/ubuntu/smart-live-announce.sh
+* * * * * sleep 30; /home/ubuntu/smart-live-announce.sh
+* * * * * sleep 40; /home/ubuntu/smart-live-announce.sh
+* * * * * sleep 50; /home/ubuntu/smart-live-announce.sh
+*/15 * * * * /home/ubuntu/delete-offline-vods.sh
+0 */3 * * * /home/ubuntu/refresh-token.sh
+* * * * * /home/ubuntu/end-live-message.sh
+* * * * * sleep 10; /home/ubuntu/end-live-message.sh
+* * * * * sleep 20; /home/ubuntu/end-live-message.sh
+* * * * * sleep 30; /home/ubuntu/end-live-message.sh
+* * * * * sleep 40; /home/ubuntu/end-live-message.sh
+* * * * * sleep 50; /home/ubuntu/end-live-message.sh
+*/15 * * * * /home/ubuntu/discord-reminder.sh
+0 */2 * * * /home/ubuntu/reset-offline.sh
+*/15 * * * * /home/ubuntu/clear-chat-offline.sh
+* * * * * /home/ubuntu/x-live-watchdog.sh
+* * * * * sleep 10; /home/ubuntu/x-live-watchdog.sh
+* * * * * sleep 20; /home/ubuntu/x-live-watchdog.sh
+* * * * * sleep 30; /home/ubuntu/x-live-watchdog.sh
+* * * * * sleep 40; /home/ubuntu/x-live-watchdog.sh
+* * * * * sleep 50; /home/ubuntu/x-live-watchdog.sh

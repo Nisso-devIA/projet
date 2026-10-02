@@ -1,0 +1,16 @@
+[Unit]
+Description=ZAELDRYK Offline Chatbot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+ExecStart=/usr/bin/python3 /home/ubuntu/zaeldryk/twitch/offline-chatbot.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ubuntu/zaeldryk/logs/offline-chatbot.log
+StandardError=append:/home/ubuntu/zaeldryk/logs/offline-chatbot.log
+
+[Install]
+WantedBy=multi-user.target

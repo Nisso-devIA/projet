@@ -1,0 +1,16 @@
+[Unit]
+Description=ZAELDRYK Moderation Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+ExecStart=/usr/bin/python3 /home/ubuntu/zaeldryk/twitch/moderation-bot.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ubuntu/zaeldryk/logs/moderation-bot.log
+StandardError=append:/home/ubuntu/zaeldryk/logs/moderation-bot.log
+
+[Install]
+WantedBy=multi-user.target

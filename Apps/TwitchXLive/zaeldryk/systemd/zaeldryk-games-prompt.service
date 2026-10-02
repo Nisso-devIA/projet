@@ -1,0 +1,13 @@
+[Unit]
+Description=ZAELDRYK daily #🎮-jeux engagement prompt
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk
+Environment=ZAEL_ROOT=/home/ubuntu/zaeldryk
+ExecStart=/home/ubuntu/zaeldryk/discord/run-games-prompt.sh
+
+[Install]
+WantedBy=multi-user.target

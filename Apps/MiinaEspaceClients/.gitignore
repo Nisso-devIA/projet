@@ -1,0 +1,19 @@
+# dependencies
+/node_modules
+/.next
+/out
+.env*.local
+*.tsbuildinfo
+next-env.d.ts
+
+# données runtime (catalogue + PDF fusionnés)
+/data
+
+# sources HQ (reprocess via npm run prepare:assets)
+public/brand/_carre-src.png
+public/brand/_oursons-src.png
+WhatsApp Image*.jpeg
+CARRE.tiff
+OURSONS.tiff
+grok-image-*.jpg
+ChatGPT Image*.png

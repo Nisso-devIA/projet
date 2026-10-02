@@ -1,0 +1,11 @@
+[Unit]
+Description=ZAELDRYK Twitch VOD ? YouTube clips (Shorts + classic)
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk/youtube-clips
+Environment=ZAEL_ROOT=/home/ubuntu/zaeldryk
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/ubuntu/zaeldryk/youtube-clips/run-youtube-clips.sh

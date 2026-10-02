@@ -1,0 +1,74 @@
+{
+
+  "botName": "WhatsApp Bot",
+
+  "prefix": "!",
+
+  "ignoreGroups": false,
+
+  "ignoreStatus": true,
+
+  "markAsRead": false,
+
+  "showTyping": false,
+
+  "stealthChats": ["33665618712"],
+
+  "notifyOwnerOnRead": true,
+
+  "notifyOwnerOnReadChats": [],
+
+  "transcribeVoice": false,
+
+  "transcribeMode": "command",
+
+  "transcribeAllowList": [],
+
+  "transcribeReplyInChat": true,
+
+  "transcribeLanguage": "fr",
+
+  "autoRepliesEnabled": false,
+
+  "allowProactiveChatMessages": false,
+
+  "commandsOwnerOnly": true,
+
+  "autoReplies": [],
+
+  "liveAnnounce": {
+
+    "enabled": true,
+
+    "modeFile": "/home/ubuntu/zaeldryk/state/mode.txt",
+
+    "pollSeconds": 15,
+
+    "confirmPolls": 4,
+
+    "twitchEnvFile": "/home/ubuntu/zaeldryk/config/twitch.env",
+
+    "liveEnvFile": "/home/ubuntu/zaeldryk/config/live.env",
+
+    "twitchUrl": "https://twitch.tv/zaeldryk",
+
+    "liveStatusText": "🔴 Zaeldryk est EN LIVE !",
+
+    "endStatusText": "✅ Live terminé — merci d'avoir regardé ! À bientôt 👋",
+
+    "liveBackgroundColor": "#9146FF",
+
+    "endBackgroundColor": "#1a1a2e",
+
+    "statusFont": 2,
+
+    "statusAudience": "all",
+
+    "statusJidList": [],
+
+    "maxStoriesPerDay": 4
+
+  }
+
+}
+
