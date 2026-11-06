@@ -1,0 +1,22 @@
+[Unit]
+Description=Deals PS FR — DualSense + PSN price lows (Discord)
+After=network-online.target sentinelle-wg.service
+Wants=network-online.target sentinelle-wg.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk
+EnvironmentFile=-/home/ubuntu/zaeldryk/config/discord.env
+EnvironmentFile=-/home/ubuntu/zaeldryk/config/deals-ps.env
+Environment=STATE_FILE=/home/ubuntu/zaeldryk/state/deals-ps-fr.json
+Environment=USE_FREEBOX_NS=1
+Environment=NS_FETCH=/opt/sentinelle/ns-fetch.sh
+ExecStart=/home/ubuntu/zaeldryk/venv-micromania/bin/python /home/ubuntu/zaeldryk/tools/deals-ps-fr-watch.py
+Nice=10
+StandardOutput=append:/home/ubuntu/zaeldryk/logs/deals-ps-fr.log
+StandardError=append:/home/ubuntu/zaeldryk/logs/deals-ps-fr.log
+
+[Install]
+WantedBy=multi-user.target

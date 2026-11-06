@@ -1,50 +1,18 @@
 #!/usr/bin/env python3
-"""Annonce setup stream bientôt finalisé — #📢-annonces."""
-import json
-import urllib.request
-from pathlib import Path
+"""Annonce setup stream ~80% — #📢-annonces."""
+from announce_common import ANNONCES_CHANNEL_ID, post_announce
 
-CHANNEL_ID = "1541249724902809692"
-env = Path("/home/ubuntu/zaeldryk/config/discord.env")
-token = None
-for line in env.read_text(encoding="utf-8").splitlines():
-    if line.startswith("DISCORD_BOT_TOKEN="):
-        token = line.split("=", 1)[1].strip().strip('"').strip("'")
-        break
-if not token:
-    raise SystemExit("DISCORD_BOT_TOKEN missing")
-
-payload = {
-    "content": "@everyone",
-    "allowed_mentions": {"parse": ["everyone"]},
-    "embeds": [
-        {
-            "title": "Setup stream — bientôt prêt",
-            "description": (
-                "Le setup stream est **presque finalisé**.\n\n"
-                "Derniers tests en cours pour vous offrir la **meilleure qualité possible** "
-                "dès le retour en live.\n\n"
-                "Follow la chaîne Twitch et restez branchés ici sur le Discord — "
-                "ça arrive bientôt.\n\n"
-                "https://www.twitch.tv/zaeldryk"
-            ),
-            "color": 0x9146FF,
-            "footer": {"text": "Zaeldryk — Stream"},
-        }
-    ],
-}
-
-data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-req = urllib.request.Request(
-    f"https://discord.com/api/v10/channels/{CHANNEL_ID}/messages",
-    data=data,
-    headers={
-        "Authorization": f"Bot {token}",
-        "Content-Type": "application/json",
-        "User-Agent": "ZaelrysAnnounce/1.0",
-    },
-    method="POST",
+CONTENT = (
+    "## Les streams reprennent bientôt ⚔️\n\n"
+    "Le setup avance bien — on est à environ **80 %** de la finalisation.\n\n"
+    "• Derniers réglages en cours pour la **meilleure qualité possible**\n"
+    "• Retour en live **très bientôt**\n"
+    "• Horaire habituel autour de **22h–23h30**\n\n"
+    "Restez branchés ici pour le planning.\n"
+    "👉 **Chaîne Twitch :** https://twitch.tv/zaeldryk\n\n"
+    "Merci de faire partie de la communauté 🐺"
 )
-with urllib.request.urlopen(req, timeout=30) as resp:
-    body = json.loads(resp.read())
-print("posted", body.get("id"), "in", CHANNEL_ID)
+
+if __name__ == "__main__":
+    body = post_announce(CONTENT)
+    print("posted", body.get("id"), "in", ANNONCES_CHANNEL_ID)

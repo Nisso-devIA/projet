@@ -1,10 +1,10 @@
 [Unit]
-Description=Sync Twitch schedule to Discord events every 6 hours
+Description=Sync Twitch schedule to Discord events and planning poster
 
 [Timer]
-OnBootSec=20min
-OnUnitActiveSec=6h
-AccuracySec=15min
+OnBootSec=2min
+OnUnitActiveSec=10min
+AccuracySec=30s
 Persistent=true
 Unit=zaeldryk-schedule-sync.service
 

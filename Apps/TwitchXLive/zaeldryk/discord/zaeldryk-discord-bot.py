@@ -2,6 +2,8 @@ import asyncio
 import json
 import os
 import random
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Set
@@ -11,6 +13,9 @@ from discord import app_commands
 from discord.ext import commands
 
 CONFIG_PATH = Path("/home/ubuntu/zaeldryk/config/discord.env")
+XAI_ENV_PATH = Path("/home/ubuntu/zaeldryk/config/xai.env")
+XAI_API_URL = "https://api.x.ai/v1/chat/completions"
+XAI_MODEL_DEFAULT = "grok-4.7"
 
 
 def load_discord_env(path: Path = CONFIG_PATH) -> dict:
@@ -42,6 +47,8 @@ CHANNEL_MEMBERS_ID = 1541534998488813659  # ID salon 👥 Membres
 CHANNEL_BOTS_ID = 1541534999549837402     # ID salon 🤖 Bots
 CHANNEL_DEPARTS = "🚪-départs"  # nom exact du salon
 CHANNEL_SONDAGES_ID = 1542633689840877579  # 📊-sondages
+CHANNEL_ANNONCES_ID = 1541249724902809692  # 📢-annonces
+TWITCH_URL = "https://twitch.tv/zaeldryk"
 POLL_STATE_FILE = Path("/home/ubuntu/zaeldryk/state/live-polls.json")
 PENDING_POLL_FILE = Path("/home/ubuntu/zaeldryk/state/pending-poll.json")
 
@@ -444,6 +451,206 @@ def is_staff(member: discord.Member) -> bool:
     return any(r.name == ROLE_STAFF for r in member.roles)
 
 
+def is_owner(member: discord.Member) -> bool:
+    return member.guild is not None and member.id == member.guild.owner_id
+
+
+def can_announce(member: discord.Member) -> bool:
+    return is_owner(member) or is_staff(member)
+
+
+def parse_embed_color(raw: str) -> int | None:
+    s = (raw or "").strip().lstrip("#")
+    if not s:
+        return None
+    try:
+        n = int(s, 16)
+    except ValueError:
+        return None
+    if 0 <= n <= 0xFFFFFF:
+        return n
+    return None
+
+
+def load_xai() -> tuple[str, str]:
+    env = {}
+    if XAI_ENV_PATH.exists():
+        env.update(load_discord_env(XAI_ENV_PATH))
+    key = (env.get("XAI_API_KEY") or os.environ.get("XAI_API_KEY") or "").strip()
+    model = (env.get("XAI_MODEL") or os.environ.get("XAI_MODEL") or XAI_MODEL_DEFAULT).strip()
+    return key, model
+
+
+ANNONCE_SYSTEM = """Tu rédiges des annonces Discord pour le serveur Zaelrys / chaîne Twitch Zaeldryk.
+Style obligatoire (message texte, pas un article) :
+- Titre en markdown : ## … avec un emoji cohérent (⚔️ si neutre, univers du jeu sinon)
+- Paragraphe d’accroche, **gras** sur les infos clés (jeu, horaire, action)
+- Puces • **…** s’il y a plusieurs infos
+- Lien : 👉 **Chaîne Twitch :** URL  (ou 👉 **Lien :** si ce n’est pas Twitch)
+- Clôture courte avec 🐺 ou un emoji de l’univers (une fois)
+- Ton communautaire FR, direct, pas corporate, pas de hashtags
+- N’invente PAS de date, prix, ni URL d’image. Si le brief ne donne pas l’heure, dis « ce soir » ou l’horaire habituel 22h–23h30 seulement s’il s’agit d’un live.
+- Si un thème / univers est donné (ex. Zelda Ocarina of Time), imprègne le texte ET propose 2 ou 3 embeds aux couleurs de cet univers (hex 6 caractères, sans #).
+Réponds UNIQUEMENT en JSON :
+{"content":"texte discord SANS @everyone","embeds":[{"title":"...","description":"...","color":"00A651"}]}
+embeds peut être [] si aucun thème visuel. Max 3 embeds. description <= 400 caractères. Pas de champ image."""
+
+
+def _grok_generate(brief: str, theme: str, link: str) -> dict:
+    key, model = load_xai()
+    if not key:
+        raise RuntimeError(
+            "Clé xAI absente. Ajoute XAI_API_KEY dans /home/ubuntu/zaeldryk/config/xai.env"
+        )
+    user = (
+        f"Brief : {brief}\n"
+        f"Thème / univers : {theme or 'aucun — annonce serveur classique'}\n"
+        f"Lien à inclure : {link}\n"
+    )
+    payload = {
+        "model": model,
+        "temperature": 0.7,
+        "messages": [
+            {"role": "system", "content": ANNONCE_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        XAI_API_URL,
+        data=data,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "User-Agent": "ZaelrysAnnounce/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:400]
+        raise RuntimeError(f"xAI HTTP {e.code}: {detail}") from e
+    text = (((raw.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end < start:
+        raise RuntimeError("Réponse Grok illisible")
+    parsed = json.loads(text[start : end + 1])
+    content = (parsed.get("content") or "").strip()
+    if not content:
+        raise RuntimeError("Grok n’a pas renvoyé de texte")
+    embeds: list[discord.Embed] = []
+    for item in (parsed.get("embeds") or [])[:3]:
+        if not isinstance(item, dict):
+            continue
+        color = parse_embed_color(str(item.get("color") or "")) or 0x5865F2
+        emb = discord.Embed(
+            title=(str(item.get("title") or "")[:256] or None),
+            description=(str(item.get("description") or "")[:500] or None),
+            color=color,
+            url=link if link.startswith("http") else None,
+        )
+        emb.set_footer(text="Zaeldryk — Annonce")
+        embeds.append(emb)
+    return {"content": content[:1900], "embeds": embeds}
+
+
+class AnnonceConfirmView(discord.ui.View):
+    def __init__(self, content: str, embeds: list, ping_everyone: bool):
+        super().__init__(timeout=600)
+        self.content = content
+        self.embeds = embeds
+        self.ping_everyone = ping_everyone
+
+    async def _disable(self, interaction: discord.Interaction, note: str):
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(content=note[:2000], view=self, embeds=[])
+
+    @discord.ui.button(label="Publier", style=discord.ButtonStyle.success)
+    async def publish(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not isinstance(interaction.user, discord.Member) or not can_announce(interaction.user):
+            await interaction.response.send_message("⛔ Réservé owner / staff.", ephemeral=True)
+            return
+        guild = interaction.guild
+        channel = guild.get_channel(CHANNEL_ANNONCES_ID) if guild else None
+        if channel is None and guild:
+            channel = await guild.fetch_channel(CHANNEL_ANNONCES_ID)
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message("Salon #annonces introuvable.", ephemeral=True)
+            return
+        text = self.content
+        if self.ping_everyone and "@everyone" not in text:
+            text = f"@everyone\n\n{text}"
+        msg = await channel.send(
+            content=text,
+            embeds=self.embeds or None,
+            allowed_mentions=discord.AllowedMentions(everyone=self.ping_everyone),
+        )
+        await self._disable(interaction, f"✅ Publié : {msg.jump_url}")
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._disable(interaction, "Annonce annulée.")
+
+
+class AnnonceModal(discord.ui.Modal, title="Annonce (générée par Grok)"):
+    brief = discord.ui.TextInput(
+        label="De quoi parler ?",
+        style=discord.TextStyle.paragraph,
+        placeholder="Live ce soir sur Ocarina of Time remake, vers 22h",
+        max_length=800,
+        required=True,
+    )
+    theme = discord.ui.TextInput(
+        label="Thème / univers (optionnel)",
+        placeholder="Zelda Ocarina of Time — vert Kokiri, or Triforce",
+        max_length=200,
+        required=False,
+    )
+    lien = discord.ui.TextInput(
+        label="Lien (vide = Twitch)",
+        placeholder=TWITCH_URL,
+        max_length=200,
+        required=False,
+    )
+
+    def __init__(self, ping_everyone: bool = True):
+        super().__init__()
+        self.ping_everyone = ping_everyone
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not isinstance(interaction.user, discord.Member) or not can_announce(interaction.user):
+            await interaction.response.send_message("⛔ Réservé owner / staff.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        brief = str(self.brief.value).strip()
+        theme = str(self.theme.value).strip() if self.theme.value else ""
+        link = (str(self.lien.value).strip() if self.lien.value else "") or TWITCH_URL
+        try:
+            generated = await asyncio.to_thread(_grok_generate, brief, theme, link)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Génération : {e}", ephemeral=True)
+            return
+        preview = generated["content"]
+        if len(preview) > 1700:
+            preview = preview[:1700] + "…"
+        view = AnnonceConfirmView(
+            generated["content"], generated["embeds"], self.ping_everyone
+        )
+        await interaction.followup.send(
+            "**Aperçu** — Publier ou Annuler\n\n" + preview,
+            embeds=generated["embeds"][:1] or None,
+            view=view,
+            ephemeral=True,
+        )
+
+
 CAPTCHA_MAX_ATTEMPTS = 3
 _captcha_failures: Dict[int, int] = {}
 
@@ -641,6 +848,33 @@ async def on_ready():
 
     bot.loop.create_task(counter_loop())
     bot.loop.create_task(poll_closer_loop())
+
+
+@bot.tree.command(
+    name="annonce",
+    description="Grok rédige une annonce Zaelrys, tu valides, ça part dans #annonces",
+    guild=discord.Object(id=GUILD_ID),
+)
+@app_commands.describe(ping="Mention @everyone ?")
+@app_commands.choices(
+    ping=[
+        app_commands.Choice(name="Oui — @everyone", value="yes"),
+        app_commands.Choice(name="Non — sans ping", value="no"),
+    ]
+)
+async def annonce_cmd(
+    interaction: discord.Interaction,
+    ping: app_commands.Choice[str],
+):
+    if not isinstance(interaction.user, discord.Member) or not can_announce(interaction.user):
+        await interaction.response.send_message(
+            "⛔ Réservé à l’owner / staff (⚔️ Sentinelle).",
+            ephemeral=True,
+        )
+        return
+    await interaction.response.send_modal(
+        AnnonceModal(ping_everyone=(ping.value == "yes"))
+    )
 
 
 @bot.tree.command(

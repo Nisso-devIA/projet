@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -290,6 +291,23 @@ def main() -> None:
 
     save_state(mapping)
     log(f"done created={created} updated={updated} deleted={deleted} mapped={len(mapping)}")
+    refresh_planning_poster()
+
+
+def refresh_planning_poster() -> None:
+    py = ZAEL_ROOT / "venv-micromania" / "bin" / "python"
+    script = ZAEL_ROOT / "tools" / "render-planning-poster.py"
+    if not py.exists() or not script.exists():
+        log("planning poster skipped")
+        return
+    proc = subprocess.run(
+        [str(py), str(script), "--post"],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    line = (proc.stdout or proc.stderr or "").strip().splitlines()
+    log("planning " + (line[-1] if line else f"exit {proc.returncode}"))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run deals-ps-fr every 15 minutes
+Requires=deals-ps-fr.service
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Persistent=true
+Unit=deals-ps-fr.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run upcoming-big watcher every 30 minutes
+Requires=upcoming-big.service
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=30min
+AccuracySec=2min
+Unit=upcoming-big.service
+
+[Install]
+WantedBy=timers.target

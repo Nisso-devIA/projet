@@ -1,0 +1,13 @@
+[Unit]
+Description=WireGuard Freebox netns (IP maison) pour scrapers Discord
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/sentinelle/wg-up.sh
+ExecStop=/opt/sentinelle/wg-down.sh
+
+[Install]
+WantedBy=multi-user.target
