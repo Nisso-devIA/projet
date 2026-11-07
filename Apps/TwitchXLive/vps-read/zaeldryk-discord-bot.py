@@ -1,10 +1,19 @@
 import asyncio
+from datetime import datetime
+from pathlib import Path
+
 import discord
 from discord.ext import commands
 from discord.ui import Button, View
-from datetime import datetime
 
-BOT_TOKEN = "MTU0MTI0NjcxMjk0NDAwNTE2MA.GFVJfo.HgGHfJQk2rLYeQZ0b_E4g7kZvNwcBcySjY7QKs"
+def _discord_token() -> str:
+    path = Path("/home/ubuntu/zaeldryk/config/discord.env")
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("DISCORD_BOT_TOKEN="):
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError("DISCORD_BOT_TOKEN missing in discord.env")
+
+BOT_TOKEN = _discord_token()
 GUILD_ID = 867426693286461490
 
 ROLE_DISCIPLE = "🐺 Disciple"
