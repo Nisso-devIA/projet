@@ -10,7 +10,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from oot_titles import OOT_KEYS, OOT_QUERY, OOT_TITLES
+from oot_titles import OOT_KEYS, OOT_QUERY, OOT_TITLES, encode_channel_body
 
 ROOT = Path("/home/ubuntu/zaeldryk")
 BROADCASTER = "426411773"
@@ -57,14 +57,14 @@ def token() -> str:
 
 
 def helix(method: str, url: str, cid: str, tok: str, body: dict | None = None) -> tuple[int, dict]:
-    data = None if body is None else json.dumps(body).encode()
+    data = None if body is None else encode_channel_body(body)
     headers = {
         "Client-ID": cid,
         "Authorization": "Bearer " + tok,
         "User-Agent": "ZaelrysGoLive/1.0",
     }
     if body is not None:
-        headers["Content-Type"] = "application/json"
+        headers["Content-Type"] = "application/json; charset=utf-8"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
