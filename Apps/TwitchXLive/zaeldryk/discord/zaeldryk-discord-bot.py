@@ -1116,4 +1116,15 @@ async def update_member_counters(guild):
             await ch_b.edit(name=new_name)
 
 
+try:
+    import sys
+
+    sys.path.insert(0, str(Path("/home/ubuntu/zaeldryk")))
+    from clips.bot_hooks import register_clip_commands
+
+    register_clip_commands(bot)
+    print("clip commands registered", flush=True)
+except Exception as exc:
+    print(f"clip commands not registered: {exc}", flush=True)
+
 bot.run(BOT_TOKEN)
