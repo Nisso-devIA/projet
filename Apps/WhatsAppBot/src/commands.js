@@ -69,12 +69,12 @@ const commands = {
     return formatLastReads();
   },
 
-  vues: ({ jid }) => {
-    if (!isOwner(jid)) return "Réservé au propriétaire.";
+  vues: ({ jid, fromMe }) => {
+    if (!isOwner(jid) && !fromMe) return "Réservé au propriétaire.";
     return formatStatusViews();
   },
-  statut: ({ jid }) => {
-    if (!isOwner(jid)) return "Réservé au propriétaire.";
+  statut: ({ jid, fromMe }) => {
+    if (!isOwner(jid) && !fromMe) return "Réservé au propriétaire.";
     return formatStatusViews();
   },
 
