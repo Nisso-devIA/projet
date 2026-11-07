@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pages OBS : spectateurs, objectif, derniers follows / subs / dons."""
+"""Pages OBS : spectateurs, objectif, alertes, chat et plaques du cadre."""
 from __future__ import annotations
 
 import json
@@ -18,6 +18,10 @@ ROOT = Path(os.environ.get("ZAEL_ROOT", "/home/ubuntu/zaeldryk"))
 HTML = Path(__file__).with_name("viewers.html")
 GOAL_HTML = Path(__file__).with_name("objectif.html")
 FLUX_HTML = Path(__file__).with_name("flux.html")
+CHAT_HTML = Path(__file__).with_name("chat.html")
+SUB_HTML = Path(__file__).with_name("nom-sub.html")
+DON_HTML = Path(__file__).with_name("nom-don.html")
+FOLLOW_HTML = Path(__file__).with_name("nom-follow.html")
 ACTIVITY_PATH = ROOT / "state" / "overlay-activity.json"
 PORT = int(os.environ.get("VIEWERS_PORT", "8791"))
 FOLLOW_GOAL = int(os.environ.get("FOLLOW_GOAL", "100"))
@@ -26,6 +30,8 @@ KEEP = 8
 _cache = {"at": 0.0, "body": b'{"count":0,"live":false}'}
 _followers = {"at": 0.0, "body": b'{"followers":0,"goal":100}'}
 _lock = threading.Lock()
+_chat: list[dict] = []
+CHAT_KEEP = 30
 
 
 def load_env() -> dict:
@@ -130,6 +136,37 @@ def handle_irc_line(line: str) -> dict | None:
     return None
 
 
+def chat_from_line(line: str) -> dict | None:
+    """Message public du chat. None pour tout le reste."""
+    tags, rest = parse_tags(line)
+    marker = " PRIVMSG "
+    pos = rest.upper().find(marker)
+    if pos < 0:
+        return None
+    name = tags.get("display-name") or tags.get("login") or ""
+    if not name:
+        return None
+    _, sep, message = rest[pos + len(marker) :].partition(" :")
+    if not sep:
+        return None
+    message = message.replace("\x01ACTION ", "").replace("\x01", "").strip()
+    if not message:
+        return None
+    return {"name": name[:40], "text": message[:220]}
+
+
+def remember_chat(item: dict) -> None:
+    with _lock:
+        _chat.append({"name": item["name"], "text": item["text"]})
+        del _chat[:-CHAT_KEEP]
+
+
+def chat_body() -> bytes:
+    with _lock:
+        rows = list(_chat)
+    return json.dumps({"messages": rows}, ensure_ascii=False).encode("utf-8")
+
+
 def note_event(event: dict) -> None:
     now = datetime.now(timezone.utc).isoformat()
     if event["bucket"] == "subs":
@@ -216,6 +253,9 @@ def run_irc() -> None:
             if line.startswith("PING"):
                 send("PONG :tmi.twitch.tv")
                 continue
+            spoken = chat_from_line(line)
+            if spoken:
+                remember_chat(spoken)
             event = handle_irc_line(line)
             if event:
                 note_event(event)
@@ -345,6 +385,12 @@ class Handler(BaseHTTPRequestHandler):
             "/objectif.html": lambda: self._send(GOAL_HTML.read_bytes(), "text/html; charset=utf-8"),
             "/flux": lambda: self._send(FLUX_HTML.read_bytes(), "text/html; charset=utf-8"),
             "/flux.html": lambda: self._send(FLUX_HTML.read_bytes(), "text/html; charset=utf-8"),
+            "/messages": lambda: self._send(chat_body(), "application/json; charset=utf-8"),
+            "/chat": lambda: self._send(CHAT_HTML.read_bytes(), "text/html; charset=utf-8"),
+            "/chat.html": lambda: self._send(CHAT_HTML.read_bytes(), "text/html; charset=utf-8"),
+            "/nom-sub": lambda: self._send(SUB_HTML.read_bytes(), "text/html; charset=utf-8"),
+            "/nom-don": lambda: self._send(DON_HTML.read_bytes(), "text/html; charset=utf-8"),
+            "/nom-follow": lambda: self._send(FOLLOW_HTML.read_bytes(), "text/html; charset=utf-8"),
         }
         handler = pages.get(path)
         if handler is None:

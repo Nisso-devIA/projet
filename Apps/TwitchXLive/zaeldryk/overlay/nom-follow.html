@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Nombre de followers</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet" />
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      container-type: size;
+    }
+    body.fond { background: #102418; }
+    .nom {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: Cinzel, "Times New Roman", serif;
+      font-size: 62cqh;
+      color: #f4e2a8;
+      text-shadow: 0 2px 0 #3a250c;
+    }
+  </style>
+</head>
+<body>
+  <div class="nom" id="nom">—</div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    if (params.has("fond")) document.body.classList.add("fond");
+    const nom = document.getElementById("nom");
+    if (params.has("demo")) {
+      nom.textContent = "48";
+    } else {
+      async function tick() {
+        try {
+          const res = await fetch("/followers", { cache: "no-store" });
+          const data = await res.json();
+          nom.textContent = String(data.followers ?? "—");
+        } catch (err) { /* la plaque reste vide */ }
+      }
+      tick();
+      setInterval(tick, 12000);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Chat sur le parchemin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;700&display=swap" rel="stylesheet" />
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      container-type: size;
+    }
+    body.fond { background: #07140d; }
+    #log {
+      position: absolute;
+      left: 13%;
+      right: 13%;
+      top: 20%;
+      bottom: 15%;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      gap: 0.35em;
+      overflow: hidden;
+      font-family: "Source Serif 4", Palatino, "Times New Roman", serif;
+      font-size: 5.4cqw;
+      line-height: 1.2;
+      color: #2a1a0c;
+    }
+    .row { word-wrap: break-word; }
+    .name { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div id="log"></div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    if (params.has("fond")) document.body.classList.add("fond");
+    const log = document.getElementById("log");
+    function esc(value) {
+      return String(value).replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      })[ch]);
+    }
+    function paint(rows) {
+      const visible = (rows || []).slice(-8);
+      log.innerHTML = visible.map((row) =>
+        '<div class="row"><span class="name">' + esc(row.name) + '</span> ' + esc(row.text) + "</div>"
+      ).join("");
+    }
+    if (params.has("demo")) {
+      paint([
+        { name: "Navi", text: "Le temple de l'eau, à gauche." },
+        { name: "Epona", text: "Tu as oublié la carte." },
+        { name: "Saria", text: "Encore un coffre vide." },
+        { name: "Darunia", text: "Je reste jusqu'au boss." }
+      ]);
+    } else {
+      async function tick() {
+        try {
+          const res = await fetch("/messages", { cache: "no-store" });
+          const data = await res.json();
+          paint(data.messages);
+        } catch (err) { /* le cadre reste vide */ }
+      }
+      tick();
+      setInterval(tick, 2000);
+    }
+  </script>
+</body>
+</html>
