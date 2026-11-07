@@ -115,6 +115,7 @@ def handle_irc_line(line: str) -> dict | None:
             "name": name,
             "prime": plan.lower() == "prime",
             "gift": kind in {"subgift", "anonsubgift"},
+            "plan": plan,
             "bits": 0,
         }
     if " PRIVMSG " in upper and tags.get("bits"):
@@ -139,6 +140,7 @@ def note_event(event: dict) -> None:
                 "at": now,
                 "prime": bool(event["prime"]),
                 "gift": bool(event["gift"]),
+                "plan": event.get("plan") or "",
             },
         )
         return
@@ -323,6 +325,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
+        if path.startswith("/sounds/"):
+            name = Path(path).name
+            sound = Path(__file__).resolve().parent / "sounds" / name
+            if sound.suffix.lower() not in {".wav", ".mp3", ".ogg"} or not sound.is_file():
+                self.send_response(404)
+                self.end_headers()
+                return
+            kind = "audio/wav" if sound.suffix.lower() == ".wav" else "audio/mpeg"
+            self._send(sound.read_bytes(), kind)
+            return
         pages = {
             "/count": lambda: self._send(cached_count(), "application/json; charset=utf-8"),
             "/followers": lambda: self._send(cached_followers(), "application/json; charset=utf-8"),

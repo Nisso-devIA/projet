@@ -79,6 +79,31 @@
       return "Don · " + (row.bits || 0) + " bits";
     }
 
+    function eurosFromBits(bits) {
+      return (Number(bits) || 0) / 100;
+    }
+    function rupeeFile(euros) {
+      if (euros >= 200) return "sounds/rupee-gold.wav";
+      if (euros >= 50) return "sounds/rupee-purple.wav";
+      if (euros >= 20) return "sounds/rupee-red.wav";
+      if (euros >= 5) return "sounds/rupee-blue.wav";
+      return "sounds/rupee-green.wav";
+    }
+    function soundFor(kind, row) {
+      if (kind === "followers") return "sounds/hey-listen.wav";
+      if (kind === "subs") {
+        const plan = String(row.plan || "");
+        if (row.prime || plan === "1000" || plan === "2000") return "sounds/rupee-blue.wav";
+        if (plan === "3000") return "sounds/rupee-red.wav";
+        return "sounds/rupee-blue.wav";
+      }
+      return rupeeFile(eurosFromBits(row.bits));
+    }
+    function playSound(src) {
+      const audio = new Audio(src);
+      audio.volume = 0.9;
+      audio.play().catch(() => {});
+    }
     function render(kind, row) {
       const box = document.createElement("div");
       box.className = "alert" + (row.prime ? " prime" : "");
@@ -90,6 +115,7 @@
       name.textContent = row.name || "";
       box.append(kicker, name);
       slot.replaceChildren(box);
+      playSound(soundFor(kind, row));
     }
 
     function pump() {
