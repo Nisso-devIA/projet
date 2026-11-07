@@ -12,9 +12,12 @@ from pathlib import Path
 
 ROOT = Path(os.environ.get("ZAEL_ROOT", "/home/ubuntu/zaeldryk"))
 HTML = Path(__file__).with_name("viewers.html")
+GOAL_HTML = Path(__file__).with_name("objectif.html")
 PORT = int(os.environ.get("VIEWERS_PORT", "8791"))
+FOLLOW_GOAL = int(os.environ.get("FOLLOW_GOAL", "100"))
 CACHE_SEC = 12
 _cache = {"at": 0.0, "body": b'{"count":0,"live":false}'}
+_followers = {"at": 0.0, "body": b'{"followers":0,"goal":100}'}
 
 
 def load_env() -> dict:
@@ -64,6 +67,43 @@ def live_count() -> dict:
     return {"count": int(rows[0].get("viewer_count") or 0), "live": True}
 
 
+def follower_goal() -> dict:
+    fake = os.environ.get("FOLLOW_FAKE", "").strip()
+    goal = FOLLOW_GOAL
+    if fake:
+        return {"followers": int(fake), "goal": goal}
+    env = load_env()
+    cid = env.get("TWITCH_CLIENT_ID", "")
+    bid = env.get("TWITCH_BROADCASTER_ID", "426411773")
+    url = "https://api.twitch.tv/helix/channels/followers?" + urllib.parse.urlencode(
+        {"broadcaster_id": bid, "first": "1"}
+    )
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Client-ID": cid,
+            "Authorization": "Bearer " + token(),
+            "User-Agent": "ZaelrysViewers/1.0",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=12) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    return {"followers": int(payload.get("total") or 0), "goal": goal}
+
+
+def cached_followers() -> bytes:
+    now = time.time()
+    if now - _followers["at"] < CACHE_SEC:
+        return _followers["body"]
+    try:
+        body = json.dumps(follower_goal()).encode("utf-8")
+    except Exception:
+        body = json.dumps({"followers": 0, "goal": FOLLOW_GOAL}).encode("utf-8")
+    _followers["at"] = now
+    _followers["body"] = body
+    return body
+
+
 def cached_count() -> bytes:
     now = time.time()
     if now - _cache["at"] < CACHE_SEC:
@@ -83,6 +123,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
+        if path == "/followers":
+            data = cached_followers()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if path in {"/objectif", "/objectif.html"}:
+            data = GOAL_HTML.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path == "/count":
             data = cached_count()
             self.send_response(200)
