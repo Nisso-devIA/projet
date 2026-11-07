@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <title>Derniers follows, subs et dons</title>
+  <title>Alerte follow, sub, don</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet" />
@@ -11,18 +11,19 @@
       margin: 0;
       background: transparent;
       width: 460px;
-      height: 520px;
+      height: 140px;
       color: #f0d48a;
       font-family: Cinzel, "Times New Roman", serif;
     }
     body.fond { background: #07140d; }
-    .plaque {
+    .alert {
       box-sizing: border-box;
       width: 440px;
+      min-height: 108px;
       margin: 10px;
-      padding: 14px 16px 16px;
+      padding: 16px 18px;
       background:
-        linear-gradient(180deg, rgba(240, 212, 138, 0.16), transparent 22%),
+        linear-gradient(180deg, rgba(240, 212, 138, 0.16), transparent 28%),
         linear-gradient(180deg, #1a4a32, #102418 58%, #0b1a12);
       border: 2px solid #f0d48a;
       border-radius: 10px;
@@ -31,111 +32,122 @@
         0 0 0 6px #a67c2d,
         inset 0 0 18px rgba(0, 0, 0, 0.45);
     }
-    h2 {
-      margin: 14px 0 8px;
+    .alert.prime {
+      border: 2px solid #d7c4ff;
+      background:
+        linear-gradient(180deg, rgba(215, 196, 255, 0.2), transparent 30%),
+        linear-gradient(180deg, #3a2a68, #102418 62%, #0b1a12);
+      box-shadow:
+        0 0 0 4px #241848,
+        0 0 0 6px #f0d48a,
+        inset 0 0 16px rgba(215, 196, 255, 0.28);
+    }
+    .kicker {
       font-size: 13px;
-      letter-spacing: 0.2em;
+      letter-spacing: 0.22em;
       text-transform: uppercase;
       color: #d9c48a;
     }
-    h2:first-child { margin-top: 0; }
-    .item {
-      margin: 6px 0;
-      padding: 7px 10px;
-      border-radius: 6px;
-      background: rgba(0, 0, 0, 0.22);
-      border: 1px solid rgba(166, 124, 45, 0.7);
-      font-size: 18px;
-      line-height: 1.15;
-      text-shadow: 0 1px 0 #6a4a16;
+    .alert.prime .kicker { color: #efe6ff; }
+    .name {
+      margin-top: 6px;
+      font-size: 28px;
+      line-height: 1.05;
+      text-shadow: 0 2px 0 #6a4a16;
     }
-    .item.empty {
-      font-size: 14px;
-      letter-spacing: 0.08em;
-      color: #b7a56d;
-      text-shadow: none;
-    }
-    .item.prime {
-      border: 2px solid #d7c4ff;
-      background:
-        linear-gradient(90deg, rgba(92, 62, 168, 0.72), rgba(16, 36, 24, 0.15));
-      box-shadow: 0 0 0 2px #f0d48a, inset 0 0 12px rgba(215, 196, 255, 0.25);
-    }
-    .tag {
-      display: inline-block;
-      margin-left: 8px;
-      font-size: 11px;
-      letter-spacing: 0.16em;
-      color: #efe6ff;
-      vertical-align: 2px;
-    }
-    .bits { color: #efe6c8; font-size: 14px; margin-left: 8px; }
   </style>
 </head>
 <body>
-  <div class="plaque">
-    <h2>Derniers follows</h2>
-    <div id="follows"></div>
-    <h2>Derniers subs</h2>
-    <div id="subs"></div>
-    <h2>Derniers dons</h2>
-    <div id="dons"></div>
-  </div>
+  <div id="slot"></div>
   <script>
-    if (new URLSearchParams(location.search).has("fond")) {
-      document.body.classList.add("fond");
+    const params = new URLSearchParams(location.search);
+    if (params.has("fond")) document.body.classList.add("fond");
+    const slot = document.getElementById("slot");
+    const seen = new Set();
+    const queue = [];
+    let showing = false;
+    let primed = false;
+    const SHOW_MS = 5000;
+
+    function keyOf(kind, row) {
+      return kind + "|" + (row.name || "") + "|" + (row.at || "") + "|" + (row.bits || "");
     }
-    function line(text, extra) {
-      const div = document.createElement("div");
-      div.className = "item" + (extra || "");
-      div.textContent = text;
-      return div;
+
+    function label(kind, row) {
+      if (kind === "followers") return "Nouveau follow";
+      if (kind === "subs") return row.prime ? "Sub Prime" : row.gift ? "Sub cadeau" : "Nouveau sub";
+      return "Don · " + (row.bits || 0) + " bits";
     }
-    function fill(id, rows, render) {
-      const root = document.getElementById(id);
-      root.replaceChildren();
-      if (!rows.length) {
-        root.appendChild(line("en attente", " empty"));
+
+    function render(kind, row) {
+      const box = document.createElement("div");
+      box.className = "alert" + (row.prime ? " prime" : "");
+      const kicker = document.createElement("div");
+      kicker.className = "kicker";
+      kicker.textContent = label(kind, row);
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = row.name || "";
+      box.append(kicker, name);
+      slot.replaceChildren(box);
+    }
+
+    function pump() {
+      if (showing) return;
+      const next = queue.shift();
+      if (!next) {
+        slot.replaceChildren();
         return;
       }
-      for (const row of rows.slice(0, 3)) root.appendChild(render(row));
+      showing = true;
+      render(next.kind, next.row);
+      setTimeout(() => {
+        showing = false;
+        slot.replaceChildren();
+        pump();
+      }, SHOW_MS);
     }
-    function show(data) {
-      fill("follows", data.followers || [], (row) => line(row.name));
-      fill("subs", data.subs || [], (row) => {
-        const div = line(row.name, row.prime ? " prime" : "");
-        if (row.prime) {
-          const tag = document.createElement("span");
-          tag.className = "tag";
-          tag.textContent = "PRIME";
-          div.appendChild(tag);
-        } else if (row.gift) {
-          const tag = document.createElement("span");
-          tag.className = "tag";
-          tag.textContent = "CADEAU";
-          div.appendChild(tag);
-        }
-        return div;
-      });
-      fill("dons", data.donations || [], (row) => {
-        const div = line(row.name);
-        const bits = document.createElement("span");
-        bits.className = "bits";
-        bits.textContent = (row.bits || 0) + " bits";
-        div.appendChild(bits);
-        return div;
-      });
+
+    function enqueue(kind, rows) {
+      for (const row of rows || []) {
+        const key = keyOf(kind, row);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (!primed) continue;
+        queue.push({ kind, row });
+      }
     }
+
     async function tick() {
       try {
         const res = await fetch("/activity", { cache: "no-store" });
-        show(await res.json());
+        const data = await res.json();
+        enqueue("followers", data.followers);
+        enqueue("subs", data.subs);
+        enqueue("donations", data.donations);
+        primed = true;
+        pump();
       } catch (err) {
-        /* la plaque reste */
+        /* silence */
       }
     }
-    tick();
-    setInterval(tick, 8000);
+
+    const demo = params.get("demo");
+    if (demo) {
+      const samples = {
+        follow: ["followers", { name: "Epona", at: "1" }],
+        sub: ["subs", { name: "Darunia", at: "2", prime: false }],
+        prime: ["subs", { name: "Navi", at: "3", prime: true }],
+        don: ["donations", { name: "Ruto", at: "4", bits: 100 }],
+      };
+      const item = samples[demo] || samples.prime;
+      primed = true;
+      queue.push({ kind: item[0], row: item[1] });
+      pump();
+    } else {
+      tick();
+      setInterval(tick, 3000);
+    }
   </script>
 </body>
 </html>
