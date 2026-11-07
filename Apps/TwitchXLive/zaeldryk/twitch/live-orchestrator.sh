@@ -70,7 +70,7 @@ maybe_end_message() {
   zael_send_chat "Merci d'avoir regardé ! 🙏 À très bientôt 👋" >>"$LOG" 2>&1 || true
 }
 
-# Chat goodbye only after the stream is gone for several polls.
+# End actions only after the stream is gone for several polls.
 # A title with ending/brb/offline is still a live; one empty Helix reply is not.
 END_OFFLINE_POLLS="${END_OFFLINE_POLLS:-6}"
 
@@ -93,6 +93,9 @@ update_end_message() {
   fi
   if (( count == END_OFFLINE_POLLS )); then
     maybe_end_message
+    maybe_youtube_clips_enqueue
+    maybe_x_delete
+    maybe_discord_live_delete
     echo 0 > "$ZAEL_STATE/saw_live.txt"
   fi
 }
@@ -198,15 +201,6 @@ tick() {
       maybe_x_post "$STREAM_TITLE"
     fi
 
-    if [[ "$prev" == "live" && ( "$STREAM_MODE" == "ending" || "$STREAM_MODE" == "offline" ) ]]; then
-      maybe_youtube_clips_enqueue
-    fi
-
-    if [[ "$STREAM_MODE" != "live" ]]; then
-      maybe_x_delete
-      maybe_discord_live_delete
-    fi
-
     zael_write_mode "$STREAM_MODE"
   else
     # keep file fresh even if unchanged
@@ -219,11 +213,6 @@ tick() {
   fi
 
   update_end_message
-
-  if [[ "$STREAM_MODE" != "live" ]]; then
-    maybe_x_delete
-    maybe_discord_live_delete
-  fi
 }
 
 if [[ "${ZAEL_ORCH_SOURCE_ONLY:-}" == "1" ]]; then
