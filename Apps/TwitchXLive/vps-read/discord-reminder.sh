@@ -3,7 +3,7 @@
 CLIENT_ID="j2eaj1gxokr77a3lrzso63tr6wvk22"
 ACCESS_TOKEN=$(cat /home/ubuntu/twitch_token.txt)
 BROADCASTER_ID="426411773"
-MESSAGE="⚔️ Rejoins le Discord ZAELDRYK → https://discord.gg/tZt3G2jub57"
+MESSAGE="⚔️ Rejoins le Discord ZAELDRYK → https://discord.gg/3vH2u7pme5"
 LOG="/home/ubuntu/discord-reminder.log"
 
 # Récupère les infos du stream

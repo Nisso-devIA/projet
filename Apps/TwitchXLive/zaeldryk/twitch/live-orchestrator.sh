@@ -141,7 +141,7 @@ maybe_discord_reminder() {
   if (( now - last < DISCORD_REMINDER_SECONDS )); then
     return 0
   fi
-  local msg="${DISCORD_REMINDER_MSG:-⚔️ Rejoins la communauté Zaelrys → https://discord.gg/tZt3G2jub57}"
+  local msg="${DISCORD_REMINDER_MSG:-⚔️ Rejoins la communauté Zaelrys → https://discord.gg/3vH2u7pme5}"
   zael_log "$LOG" "Discord reminder in Twitch chat"
   zael_send_chat "$msg" >>"$LOG" 2>&1 || true
   echo "$now" > "$ZAEL_STATE/last_discord_reminder.txt"
