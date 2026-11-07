@@ -212,7 +212,7 @@ def refresh_followers() -> None:
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception:
         return
-    for row in payload.get("data") or []:
+    for row in reversed(payload.get("data") or []):
         name = row.get("user_name") or ""
         followed = row.get("followed_at") or datetime.now(timezone.utc).isoformat()
         if name:

@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <title>Nombre de followers</title>
+  <title>Dernier follow</title>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet" />
   <style>
     html, body {
@@ -15,12 +15,16 @@
     }
     body.fond { background: #102418; }
     .nom {
+      box-sizing: border-box;
       height: 100%;
       display: flex;
       align-items: center;
       justify-content: center;
+      padding: 0 8%;
+      text-align: center;
       font-family: Cinzel, "Times New Roman", serif;
-      font-size: 62cqh;
+      font-size: 42cqh;
+      line-height: 1.05;
       color: #f4e2a8;
       text-shadow: 0 2px 0 #3a250c;
     }
@@ -32,18 +36,26 @@
     const params = new URLSearchParams(location.search);
     if (params.has("fond")) document.body.classList.add("fond");
     const nom = document.getElementById("nom");
+    function latest(rows) {
+      const list = (rows || []).filter((row) => row && row.name);
+      if (!list.length) return null;
+      return list.slice().sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")))[0];
+    }
+    function show(row) {
+      nom.textContent = row && row.name ? row.name : "—";
+    }
     if (params.has("demo")) {
-      nom.textContent = "48";
+      show({ name: "Epona", at: "1" });
     } else {
       async function tick() {
         try {
-          const res = await fetch("/followers", { cache: "no-store" });
+          const res = await fetch("/activity", { cache: "no-store" });
           const data = await res.json();
-          nom.textContent = String(data.followers ?? "—");
+          show(latest(data.followers));
         } catch (err) { /* la plaque reste vide */ }
       }
       tick();
-      setInterval(tick, 12000);
+      setInterval(tick, 3000);
     }
   </script>
 </body>
