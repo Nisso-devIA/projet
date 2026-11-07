@@ -1,0 +1,20 @@
+[Unit]
+Description=Upcoming big games Switch2/PS5 alerts (owner-only Discord)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk
+EnvironmentFile=-/home/ubuntu/zaeldryk/config/discord.env
+EnvironmentFile=-/home/ubuntu/zaeldryk/config/upcoming-big.env
+Environment=STATE_FILE=/home/ubuntu/zaeldryk/state/upcoming-big.json
+ExecStart=/home/ubuntu/zaeldryk/venv-micromania/bin/python /home/ubuntu/zaeldryk/tools/upcoming-big-watch.py
+Nice=10
+StandardOutput=append:/home/ubuntu/zaeldryk/logs/upcoming-big.log
+StandardError=append:/home/ubuntu/zaeldryk/logs/upcoming-big.log
+
+[Install]
+WantedBy=multi-user.target

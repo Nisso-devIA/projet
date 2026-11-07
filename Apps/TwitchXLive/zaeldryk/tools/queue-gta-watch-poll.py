@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Queue GTA 6 tonight-watch live poll + short announce."""
 import json
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from announce_common import post_announce  # noqa: E402
 
 SONDAGES_ID = "1542633689840877579"
 ANNONCES_ID = "1541249724902809692"
@@ -53,25 +57,13 @@ PENDING.parent.mkdir(parents=True, exist_ok=True)
 PENDING.write_text(json.dumps(pending, ensure_ascii=False, indent=2), encoding="utf-8")
 print("queued", PENDING)
 
-status, msg = api(
-    "POST",
-    f"/channels/{ANNONCES_ID}/messages",
-    {
-        "content": "@everyone",
-        "allowed_mentions": {"parse": ["everyone"]},
-        "embeds": [
-            {
-                "title": "🎬 GTA VI — Extended Look ce soir",
-                "description": (
-                    "Qui va regarder le **gameplay GTA VI** ce soir ?\n\n"
-                    f"👉 Vote ici : <#{SONDAGES_ID}>\n\n"
-                    "🔗 Netflix (dispo) : https://www.netflix.com/title/83035795\n"
-                    "▶️ YouTube Rockstar (gratuit ~03h) : https://www.youtube.com/@RockstarGames"
-                ),
-                "color": 0xFC47A8,
-                "footer": {"text": "Zaeldryk — Sondage"},
-            }
-        ],
-    },
+ANNOUNCE = (
+    "## GTA VI — Extended Look ce soir 🚗\n\n"
+    "Qui va regarder le **gameplay GTA VI** ce soir ?\n\n"
+    f"👉 **Vote ici :** <#{SONDAGES_ID}>\n\n"
+    "• **Netflix :** https://www.netflix.com/title/83035795\n"
+    "• **YouTube Rockstar :** https://www.youtube.com/@RockstarGames\n\n"
+    "Merci de faire partie de la communauté 🐺"
 )
-print("announce", status, msg.get("id"))
+msg = post_announce(ANNOUNCE)
+print("announce", msg.get("id"))

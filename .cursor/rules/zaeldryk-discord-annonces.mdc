@@ -1,0 +1,33 @@
+---
+description: Format obligatoire pour #📢-annonces Discord Zaelrys / Zaeldryk
+globs: Apps/TwitchXLive/zaeldryk/**/*
+alwaysApply: false
+---
+
+# Annonces Discord (#📢-annonces)
+
+**Toutes** les annonces dans le salon `#📢-annonces` (`1541249724902809692`) utilisent le **format texte Zaelrys** — pas d’embed.
+
+Références : `tools/announce_common.py`, `post-stream-resume-announce.py`, `post-template-announce.py`.
+
+## Règles
+
+- **Depuis Discord :** `/annonce` (owner / Sentinelle) → brief + thème → **Grok (xAI)** rédige le texte Zaelrys + embeds couleur → aperçu → Publier. Clé dans `config/xai.env` (`XAI_API_KEY`).
+- **Depuis Cursor / VPS :** `post_announce(content)` dans `announce_common.py` (ou copier `post-template-announce.py`).
+- `@everyone` + `allowed_mentions: everyone` (sauf si `/annonce` sans ping).
+- Titre : `## …` avec emoji si pertinent (⚔️, 🚗, etc.).
+- **Gras** sur horaires, noms, actions importantes.
+- Listes : `• **Label**` ou lignes `👉 **Label :** URL`.
+- Lien Twitch habituel : `👉 **Chaîne Twitch :** https://twitch.tv/zaeldryk`
+- Clôture : `🐺` ou `⚔️` (une fois).
+- Récap avec visuels : **texte + URLs d’images** ou embed couleur si demandé.
+
+## Hors scope (autres salons)
+
+- `#🎁-jeux-gratuits` → embeds OK (`free-games-post.py`)
+- `#deals-ps` → embeds OK (`deals-ps-fr-watch.py`)
+- Streamcord / `#live` → inchangé
+
+## Scripts legacy
+
+Les `fix-zelda-direct-*.py` qui **éditent** d’anciens messages embed ne servent qu’en maintenance ; les **nouveaux** posts passent par le format texte.
