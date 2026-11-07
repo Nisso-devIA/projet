@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
-"""Page OBS : nombre de spectateurs Twitch, jeton lu seulement ici."""
+"""Pages OBS : spectateurs, objectif, derniers follows / subs / dons."""
 from __future__ import annotations
 
 import json
 import os
+import socket
+import ssl
+import threading
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(os.environ.get("ZAEL_ROOT", "/home/ubuntu/zaeldryk"))
 HTML = Path(__file__).with_name("viewers.html")
 GOAL_HTML = Path(__file__).with_name("objectif.html")
+FLUX_HTML = Path(__file__).with_name("flux.html")
+ACTIVITY_PATH = ROOT / "state" / "overlay-activity.json"
 PORT = int(os.environ.get("VIEWERS_PORT", "8791"))
 FOLLOW_GOAL = int(os.environ.get("FOLLOW_GOAL", "100"))
 CACHE_SEC = 12
+KEEP = 8
 _cache = {"at": 0.0, "body": b'{"count":0,"live":false}'}
 _followers = {"at": 0.0, "body": b'{"followers":0,"goal":100}'}
+_lock = threading.Lock()
 
 
 def load_env() -> dict:
@@ -39,6 +47,177 @@ def token() -> str:
         encoding="utf-8"
     )
     return raw.replace("oauth:", "").strip().splitlines()[0]
+
+
+def login_name() -> str:
+    return load_env().get("TWITCH_LOGIN", "zaeldryk").lower()
+
+
+def empty_activity() -> dict:
+    return {"followers": [], "subs": [], "donations": []}
+
+
+def load_activity() -> dict:
+    if not ACTIVITY_PATH.exists():
+        return empty_activity()
+    try:
+        data = json.loads(ACTIVITY_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return empty_activity()
+    base = empty_activity()
+    for key in base:
+        if isinstance(data.get(key), list):
+            base[key] = data[key][:KEEP]
+    return base
+
+
+def save_activity(data: dict) -> None:
+    ACTIVITY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ACTIVITY_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def remember(kind: str, item: dict) -> None:
+    with _lock:
+        data = load_activity()
+        rows = data[kind]
+        if any(row.get("name") == item["name"] and row.get("at") == item["at"] for row in rows):
+            return
+        rows.insert(0, item)
+        data[kind] = rows[:KEEP]
+        save_activity(data)
+
+
+def parse_tags(line: str) -> tuple[dict, str]:
+    tags: dict[str, str] = {}
+    rest = line
+    if line.startswith("@"):
+        raw, _, rest = line[1:].partition(" ")
+        for part in raw.split(";"):
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            tags[key] = value.replace("\\s", " ").replace("\\:", ";")
+    return tags, rest
+
+
+def handle_irc_line(line: str) -> dict | None:
+    """Retourne un événement suivi, sub ou don. None sinon."""
+    tags, rest = parse_tags(line)
+    upper = rest.upper()
+    if " USERNOTICE " in upper:
+        kind = tags.get("msg-id", "")
+        name = tags.get("display-name") or tags.get("login") or ""
+        if not name or kind not in {"sub", "resub", "subgift", "anonsubgift"}:
+            return None
+        plan = tags.get("msg-param-sub-plan", "")
+        return {
+            "bucket": "subs",
+            "name": name,
+            "prime": plan.lower() == "prime",
+            "gift": kind in {"subgift", "anonsubgift"},
+            "bits": 0,
+        }
+    if " PRIVMSG " in upper and tags.get("bits"):
+        name = tags.get("display-name") or ""
+        if not name:
+            return None
+        try:
+            bits = int(tags["bits"])
+        except ValueError:
+            return None
+        return {"bucket": "donations", "name": name, "prime": False, "gift": False, "bits": bits}
+    return None
+
+
+def note_event(event: dict) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    if event["bucket"] == "subs":
+        remember(
+            "subs",
+            {
+                "name": event["name"],
+                "at": now,
+                "prime": bool(event["prime"]),
+                "gift": bool(event["gift"]),
+            },
+        )
+        return
+    remember(
+        "donations",
+        {"name": event["name"], "at": now, "bits": int(event["bits"]), "prime": False},
+    )
+
+
+def refresh_followers() -> None:
+    fake = os.environ.get("FOLLOW_NAMES", "").strip()
+    if fake:
+        for name in [part.strip() for part in fake.split(",") if part.strip()]:
+            remember("followers", {"name": name, "at": name})
+        return
+    try:
+        env = load_env()
+        cid = env.get("TWITCH_CLIENT_ID", "")
+        bid = env.get("TWITCH_BROADCASTER_ID", "426411773")
+        url = "https://api.twitch.tv/helix/channels/followers?" + urllib.parse.urlencode(
+            {"broadcaster_id": bid, "first": "5"}
+        )
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Client-ID": cid,
+                "Authorization": "Bearer " + token(),
+                "User-Agent": "ZaelrysViewers/1.0",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return
+    for row in payload.get("data") or []:
+        name = row.get("user_name") or ""
+        followed = row.get("followed_at") or datetime.now(timezone.utc).isoformat()
+        if name:
+            remember("followers", {"name": name, "at": followed})
+
+
+def irc_loop() -> None:
+    while True:
+        try:
+            run_irc()
+        except Exception as exc:
+            print(f"irc: {type(exc).__name__}", flush=True)
+        time.sleep(8)
+
+
+def run_irc() -> None:
+    login = login_name()
+    raw = socket.create_connection(("irc.chat.twitch.tv", 6697), timeout=30)
+    sock = ssl.create_default_context().wrap_socket(raw, server_hostname="irc.chat.twitch.tv")
+    sock.settimeout(120)
+
+    def send(line: str) -> None:
+        sock.sendall((line + "\r\n").encode("utf-8"))
+
+    send("CAP REQ :twitch.tv/tags twitch.tv/commands")
+    send("PASS oauth:" + token())
+    send("NICK " + login)
+    send("JOIN #" + login)
+    print("irc joined", flush=True)
+    buf = ""
+    while True:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        buf += chunk.decode("utf-8", "replace")
+        while "\r\n" in buf:
+            line, buf = buf.split("\r\n", 1)
+            if line.startswith("PING"):
+                send("PONG :tmi.twitch.tv")
+                continue
+            event = handle_irc_line(line)
+            if event:
+                note_event(event)
+                print(f"activite {event['bucket']} prime={event['prime']}", flush=True)
 
 
 def live_count() -> dict:
@@ -117,53 +296,54 @@ def cached_count() -> bytes:
     return body
 
 
+_follow_refresh = {"at": 0.0}
+
+
+def activity_body() -> bytes:
+    now = time.time()
+    if now - _follow_refresh["at"] >= CACHE_SEC:
+        refresh_followers()
+        _follow_refresh["at"] = now
+    with _lock:
+        data = load_activity()
+    return json.dumps(data, ensure_ascii=False).encode("utf-8")
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         return
 
+    def _send(self, data: bytes, content_type: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
-        if path == "/followers":
-            data = cached_followers()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(data)))
+        pages = {
+            "/count": lambda: self._send(cached_count(), "application/json; charset=utf-8"),
+            "/followers": lambda: self._send(cached_followers(), "application/json; charset=utf-8"),
+            "/activity": lambda: self._send(activity_body(), "application/json; charset=utf-8"),
+            "/": lambda: self._send(HTML.read_bytes(), "text/html; charset=utf-8"),
+            "/viewers.html": lambda: self._send(HTML.read_bytes(), "text/html; charset=utf-8"),
+            "/objectif": lambda: self._send(GOAL_HTML.read_bytes(), "text/html; charset=utf-8"),
+            "/objectif.html": lambda: self._send(GOAL_HTML.read_bytes(), "text/html; charset=utf-8"),
+            "/flux": lambda: self._send(FLUX_HTML.read_bytes(), "text/html; charset=utf-8"),
+            "/flux.html": lambda: self._send(FLUX_HTML.read_bytes(), "text/html; charset=utf-8"),
+        }
+        handler = pages.get(path)
+        if handler is None:
+            self.send_response(404)
             self.end_headers()
-            self.wfile.write(data)
             return
-        if path in {"/objectif", "/objectif.html"}:
-            data = GOAL_HTML.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-            return
-        if path == "/count":
-            data = cached_count()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-            return
-        if path in {"/", "/viewers.html"}:
-            data = HTML.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-            return
-        self.send_response(404)
-        self.end_headers()
+        handler()
 
 
 def main() -> None:
+    threading.Thread(target=irc_loop, daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"viewers overlay on :{PORT}", flush=True)
     server.serve_forever()
