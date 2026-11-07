@@ -21,6 +21,7 @@ import { startHeartbeat, stopHeartbeat, writeHeartbeat } from "./heartbeat.js";
 import { notifyOwnerRecovery } from "./owner-notify.js";
 import { bindContactCache } from "./contact-cache.js";
 import { startLiveWatcher } from "./live-watcher.js";
+import { recordStatusView } from "./status-views.js";
 import {
   notifyOwnerOutgoingRead,
   shouldMarkIncomingAsRead,
@@ -157,6 +158,23 @@ async function startBot() {
       console.error("Impossible de générer le code de jumelage :", err.message);
     }
   }
+
+  sock.ev.on("message-receipt.update", (updates) => {
+    if (id !== sessionId) return;
+    for (const { key, receipt } of updates || []) {
+      if (!receipt?.readTimestamp) continue;
+      try {
+        recordStatusView({
+          messageId: key?.id,
+          remoteJid: key?.remoteJid,
+          userJid: receipt.userJid,
+          at: receipt.readTimestamp,
+        });
+      } catch (err) {
+        console.error("Vue statut :", err.message);
+      }
+    }
+  });
 
   sock.ev.on("messages.update", async (updates) => {
     if (id !== sessionId) return;

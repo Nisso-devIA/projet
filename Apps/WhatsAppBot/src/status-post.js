@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, ROOT_DIR } from "./config.js";
 import { getCachedContactCount, getStatusAudienceJids } from "./contact-cache.js";
+import { rememberStory } from "./status-views.js";
 
 const STATE_PATH = join(ROOT_DIR, "state", "last-live-status.json");
 const RATE_PATH = join(ROOT_DIR, "state", "story-rate.json");
@@ -124,6 +125,11 @@ export async function postTextStatus(sock, text, { backgroundColor, font } = {})
   );
 
   const delivery = result?.status || "inconnu";
+  rememberStory({
+    id: result?.key?.id,
+    kind: "statut",
+    at: new Date().toISOString(),
+  });
   console.log(
     `Story envoyée (${statusJidList.length} contacts, ${getExcludedStoryPhones().size} exclus, statut=${delivery}, cache=${getCachedContactCount()})`
   );
@@ -143,9 +149,14 @@ export async function postLiveStory(sock, title = "") {
   const base = la.liveStatusText || "🔴 Zaeldryk est EN LIVE !";
   const text = title ? `${base}\n${title}\n${url}` : `${base}\n${url}`;
 
-  await postTextStatus(sock, text, {
+  const info = await postTextStatus(sock, text, {
     backgroundColor: la.liveBackgroundColor || "#9146FF",
     font: la.statusFont ?? 2,
+  });
+  rememberStory({
+    id: info.result?.key?.id,
+    kind: "live",
+    at: new Date().toISOString(),
   });
   writeLastPosted("live");
 }
@@ -155,9 +166,14 @@ export async function postEndStory(sock) {
   const text =
     la.endStatusText || "✅ Live terminé — merci d'avoir regardé ! À bientôt 👋";
 
-  await postTextStatus(sock, text, {
+  const info = await postTextStatus(sock, text, {
     backgroundColor: la.endBackgroundColor || "#1a1a2e",
     font: la.statusFont ?? 2,
+  });
+  rememberStory({
+    id: info.result?.key?.id,
+    kind: "end",
+    at: new Date().toISOString(),
   });
   writeLastPosted("end");
 }
@@ -165,10 +181,16 @@ export async function postEndStory(sock) {
 export async function postTestStory(sock) {
   const la = config.liveAnnounce || {};
   const text = la.testStatusText || "🧪 Test story WhatsApp Bot — tout fonctionne !";
-  return postTextStatus(sock, text, {
+  const info = await postTextStatus(sock, text, {
     backgroundColor: "#128C7E",
     font: la.statusFont ?? 2,
   });
+  rememberStory({
+    id: info.result?.key?.id,
+    kind: "test",
+    at: new Date().toISOString(),
+  });
+  return info;
 }
 
 export function getLastPostedKind() {
