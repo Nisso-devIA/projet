@@ -9,19 +9,17 @@ import urllib.request
 from datetime import date
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from oot_titles import OOT_KEYS, OOT_QUERY, OOT_TITLES
+
 ROOT = Path("/home/ubuntu/zaeldryk")
 BROADCASTER = "426411773"
 
 PRESETS = [
     {
-        "keys": ("ocarina", "oot", "zelda"),
-        "query": "The Legend of Zelda: Ocarina of Time",
-        "titles": [
-            "Ocarina of Time Remake — on se perd dans Hyrule",
-            "Zelda OOT Remake en live : je découvre, vous criez",
-            "Hyrule ce soir — Ocarina of Time Remake, sans spoiler",
-            "Ocarina of Time Remake : le temple, la panique, le live",
-        ],
+        "keys": OOT_KEYS,
+        "query": OOT_QUERY,
+        "titles": OOT_TITLES,
     },
     {
         "keys": ("witcher", "sorceleur"),
