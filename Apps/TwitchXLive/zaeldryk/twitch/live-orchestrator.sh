@@ -197,6 +197,8 @@ tick() {
     zael_log "$LOG" "mode $prev → $STREAM_MODE | title=$STREAM_TITLE"
 
     if [[ "$STREAM_MODE" == "live" ]]; then
+      /usr/bin/python3 "$ZAEL_ROOT/tools/rotate-stream-title.py" >>"$LOG" 2>&1 || \
+        zael_log "$LOG" "titre au hasard ignoré"
       maybe_discord_live_announce
       maybe_x_post "$STREAM_TITLE"
     fi

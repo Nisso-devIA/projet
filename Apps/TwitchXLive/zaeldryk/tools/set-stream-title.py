@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
+import random
 import sys
 import urllib.parse
 import urllib.request
-from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -99,7 +99,7 @@ def search_game(query: str, cid: str, tok: str) -> tuple[str, str]:
 def make_title(game_name: str, preset: dict | None) -> str:
     if preset:
         titles = preset["titles"]
-        return titles[date.today().toordinal() % len(titles)][:140]
+        return random.choice(titles)[:140]
     short = game_name.strip()
     return f"{short} en live — première session, ça va déraper"[:140]
 

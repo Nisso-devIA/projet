@@ -1,26 +1,20 @@
 #!/usr/bin/env python3
-"""Change le titre Twitch toutes les 12 min pendant un live Zelda OOT.
-
-OBS continue d'envoyer l'image. Seul le titre affiché sur Twitch tourne.
-Un titre de pause (offline, ending, brb, fin de live) n'est pas écrasé.
-"""
+"""Pose un titre au hasard quand un live Zelda démarre. Une seule fois."""
 from __future__ import annotations
 
 import json
+import random
 import re
 import sys
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from oot_titles import OOT_KEYS, OOT_PLACES, detect_place, titles_for
+from oot_titles import OOT_KEYS, OOT_TITLES
 
 ROOT = Path("/home/ubuntu/zaeldryk")
-STATE = ROOT / "state" / "title-rotation.json"
-PLACE_FILE = ROOT / "state" / "oot-place.txt"
 LOG = ROOT / "logs" / "title-rotate.log"
-INTERVAL_SEC = 12 * 60
 PAUSE = re.compile(r"offline|ending|brb|fin de live|hors ligne", re.IGNORECASE)
 
 
@@ -53,7 +47,7 @@ def helix(method: str, url: str, cid: str, tok: str, body: dict | None = None) -
     headers = {
         "Client-ID": cid,
         "Authorization": "Bearer " + tok,
-        "User-Agent": "ZaelrysTitleRotate/1.0",
+        "User-Agent": "ZaelrysTitle/1.0",
     }
     if body is not None:
         headers["Content-Type"] = "application/json"
@@ -72,60 +66,9 @@ def is_oot(game: str, title: str) -> bool:
     return any(key in blob for key in OOT_KEYS)
 
 
-def read_place_note() -> str:
-    if not PLACE_FILE.exists():
-        return ""
-    return PLACE_FILE.read_text(encoding="utf-8").strip()
-
-
-def resolve_place(title: str, state: dict) -> tuple[dict | None, str, str]:
-    note = read_place_note()
-    if note.lower() in {"reset", "stop", "aucun"}:
-        note = ""
-    place = detect_place(note) or detect_place(title)
-    if place is None and not note:
-        saved = str(state.get("place") or "")
-        place = next((item for item in OOT_PLACES if item["id"] == saved), None)
-    if place:
-        return place, "", place["id"]
-    if note:
-        return None, note, note.lower()
-    return None, "", ""
-
-
-def next_title(current: str, index: int, titles: list[str], place_changed: bool) -> tuple[str, int]:
-    if place_changed:
-        pick = 0 if titles[0] != current else 1 % len(titles)
-        return titles[pick], pick
-    if current in titles:
-        nxt = (titles.index(current) + 1) % len(titles)
-        return titles[nxt], nxt
-    nxt = index % len(titles)
-    if titles[nxt] == current:
-        nxt = (nxt + 1) % len(titles)
-    return titles[nxt], nxt
-
-
-def load_state() -> dict:
-    if not STATE.exists():
-        return {"index": 0, "at": ""}
-    try:
-        return json.loads(STATE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {"index": 0, "at": ""}
-
-
-def too_soon(state: dict) -> bool:
-    raw = str(state.get("at") or "")
-    if not raw:
-        return False
-    try:
-        last = datetime.fromisoformat(raw)
-    except ValueError:
-        return False
-    if last.tzinfo is None:
-        last = last.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - last).total_seconds() < INTERVAL_SEC
+def pick_title(current: str) -> str:
+    choices = [title for title in OOT_TITLES if title != current] or list(OOT_TITLES)
+    return random.choice(choices)
 
 
 def main() -> int:
@@ -150,24 +93,13 @@ def main() -> int:
     title = stream.get("title") or ""
     game = stream.get("game_name") or ""
     if PAUSE.search(title):
-        log("titre de pause, rotation laissée")
+        log("titre de pause, laissé")
         return 0
     if not is_oot(game, title):
-        log(f"autre jeu ({game}), rotation laissée")
+        log(f"autre jeu ({game}), laissé")
         return 0
-    state = load_state()
-    place, raw, place_key = resolve_place(title, state)
-    changed = bool(place_key) and place_key != state.get("place")
-    if too_soon(state) and not changed and not dry:
-        log("dernier changement trop récent")
-        return 0
-    titles = titles_for(place, raw)
-    chosen, index = next_title(title, int(state.get("index") or 0), titles, changed)
-    where = place["label"] if place else (raw or "général")
-    if chosen == title:
-        log(f"titre déjà en place ({where})")
-        return 0
-    log(f"{'aperçu' if dry else 'titre'} [{where}] → {chosen}")
+    chosen = pick_title(title)
+    log(f"{'aperçu' if dry else 'titre'} → {chosen}")
     if dry:
         return 0
     helix(
@@ -176,19 +108,6 @@ def main() -> int:
         cid,
         tok,
         {"title": chosen},
-    )
-    STATE.parent.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(
-        json.dumps(
-            {
-                "index": index,
-                "place": place_key,
-                "at": datetime.now(timezone.utc).isoformat(),
-                "title": chosen,
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
     )
     return 0
 
