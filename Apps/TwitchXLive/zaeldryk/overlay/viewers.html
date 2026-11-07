@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Spectateurs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Cinzel+Decorative:wght@700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --forest: #102418;
+      --moss: #1c4630;
+      --gold: #f0d48a;
+      --gold-deep: #a67c2d;
+      --ink: #1a1208;
+    }
+    html, body {
+      margin: 0;
+      background: transparent;
+      width: 460px;
+      height: 128px;
+    }
+    body.fond {
+      background: #07140d;
+    }
+    .plaque {
+      box-sizing: border-box;
+      width: 440px;
+      height: 108px;
+      margin: 10px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 0 22px 0 16px;
+      color: var(--gold);
+      background:
+        linear-gradient(180deg, rgba(240, 212, 138, 0.16), transparent 28%),
+        linear-gradient(180deg, #1a4a32, var(--forest) 55%, #0b1a12);
+      border: 2px solid var(--gold);
+      border-radius: 8px;
+      box-shadow:
+        0 0 0 4px #143222,
+        0 0 0 6px var(--gold-deep),
+        inset 0 0 18px rgba(0, 0, 0, 0.45);
+      font-family: Cinzel, "Times New Roman", serif;
+    }
+    .rupee {
+      width: 46px;
+      height: 64px;
+      flex: none;
+      background: linear-gradient(160deg, #b6ff8a, #1fa85a 42%, #0d6b38);
+      clip-path: polygon(50% 0, 100% 28%, 100% 72%, 50% 100%, 0 72%, 0 28%);
+      filter: drop-shadow(0 2px 0 #08331c);
+      position: relative;
+    }
+    .rupee::after {
+      content: "";
+      position: absolute;
+      left: 14px;
+      top: 10px;
+      width: 10px;
+      height: 22px;
+      background: rgba(255, 255, 255, 0.45);
+      transform: skewX(-18deg);
+    }
+    .text { min-width: 0; }
+    .count {
+      font-family: Cinzel, "Times New Roman", serif;
+      font-size: 52px;
+      line-height: 0.9;
+      letter-spacing: 0.04em;
+      color: var(--gold);
+      text-shadow: 0 2px 0 #6a4a16, 0 0 12px rgba(240, 212, 138, 0.35);
+    }
+    .label {
+      margin-top: 4px;
+      font-size: 13px;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: #d9c48a;
+    }
+    .plaque.offline { opacity: 0.72; }
+    .plaque.offline .count { font-size: 34px; letter-spacing: 0.08em; }
+  </style>
+</head>
+<body>
+  <div class="plaque" id="plaque">
+    <div class="rupee" aria-hidden="true"></div>
+    <div class="text">
+      <div class="count" id="count">—</div>
+      <div class="label" id="label">spectateurs</div>
+    </div>
+  </div>
+  <script>
+    if (new URLSearchParams(location.search).has("fond")) {
+      document.body.classList.add("fond");
+    }
+    const countEl = document.getElementById("count");
+    const labelEl = document.getElementById("label");
+    const plaque = document.getElementById("plaque");
+
+    function show(data) {
+      const n = Number(data.count || 0);
+      if (!data.live) {
+        countEl.textContent = "hors live";
+        labelEl.textContent = "hyrule";
+        plaque.classList.add("offline");
+        return;
+      }
+      plaque.classList.remove("offline");
+      countEl.textContent = String(n);
+      labelEl.textContent = n > 1 ? "spectateurs" : "spectateur";
+    }
+
+    async function tick() {
+      try {
+        const res = await fetch("/count", { cache: "no-store" });
+        show(await res.json());
+      } catch (err) {
+        countEl.textContent = "—";
+        labelEl.textContent = "spectateurs";
+      }
+    }
+    tick();
+    setInterval(tick, 15000);
+  </script>
+</body>
+</html>
