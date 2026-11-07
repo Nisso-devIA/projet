@@ -52,11 +52,30 @@ class ModBot(commands.Bot):
         with open(DATA_FILE, "w") as f:
             json.dump(dict(self.warnings), f)
 
+    async def note_place(self, message, content):
+        parts = content.split(None, 1)
+        place = parts[1].strip() if len(parts) > 1 else ""
+        path = "/home/ubuntu/zaeldryk/state/oot-place.txt"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(place)
+        if not place or place.lower() in {"reset", "stop", "aucun"}:
+            reply = "Lieu effacé. Le titre redevient général."
+        else:
+            reply = f"Lieu noté : {place}. Le titre Twitch suit dans moins de 2 min."
+        print(f"{datetime.now()} - !ici {place or '(reset)'}", flush=True)
+        await message.channel.send(reply)
+
     async def event_ready(self):
         print(f"{datetime.now()} - Moderation Bot connecté (version complète)", flush=True)
 
     async def event_message(self, message):
         if message.echo or message.author is None:
+            return
+
+        content_now = (message.content or "").strip()
+        if content_now.lower().startswith("!ici") and message.author.is_broadcaster:
+            await self.note_place(message, content_now)
             return
 
         if message.author.is_broadcaster or message.author.is_mod:

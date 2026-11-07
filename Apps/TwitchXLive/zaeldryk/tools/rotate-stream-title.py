@@ -14,10 +14,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from oot_titles import OOT_KEYS, OOT_TITLES
+from oot_titles import OOT_KEYS, OOT_PLACES, detect_place, titles_for
 
 ROOT = Path("/home/ubuntu/zaeldryk")
 STATE = ROOT / "state" / "title-rotation.json"
+PLACE_FILE = ROOT / "state" / "oot-place.txt"
 LOG = ROOT / "logs" / "title-rotate.log"
 INTERVAL_SEC = 12 * 60
 PAUSE = re.compile(r"offline|ending|brb|fin de live|hors ligne", re.IGNORECASE)
@@ -71,8 +72,31 @@ def is_oot(game: str, title: str) -> bool:
     return any(key in blob for key in OOT_KEYS)
 
 
-def next_title(current: str, index: int) -> tuple[str, int]:
-    titles = OOT_TITLES
+def read_place_note() -> str:
+    if not PLACE_FILE.exists():
+        return ""
+    return PLACE_FILE.read_text(encoding="utf-8").strip()
+
+
+def resolve_place(title: str, state: dict) -> tuple[dict | None, str, str]:
+    note = read_place_note()
+    if note.lower() in {"reset", "stop", "aucun"}:
+        note = ""
+    place = detect_place(note) or detect_place(title)
+    if place is None and not note:
+        saved = str(state.get("place") or "")
+        place = next((item for item in OOT_PLACES if item["id"] == saved), None)
+    if place:
+        return place, "", place["id"]
+    if note:
+        return None, note, note.lower()
+    return None, "", ""
+
+
+def next_title(current: str, index: int, titles: list[str], place_changed: bool) -> tuple[str, int]:
+    if place_changed:
+        pick = 0 if titles[0] != current else 1 % len(titles)
+        return titles[pick], pick
     if current in titles:
         nxt = (titles.index(current) + 1) % len(titles)
         return titles[nxt], nxt
@@ -132,14 +156,18 @@ def main() -> int:
         log(f"autre jeu ({game}), rotation laissée")
         return 0
     state = load_state()
-    if too_soon(state) and not dry:
+    place, raw, place_key = resolve_place(title, state)
+    changed = bool(place_key) and place_key != state.get("place")
+    if too_soon(state) and not changed and not dry:
         log("dernier changement trop récent")
         return 0
-    chosen, index = next_title(title, int(state.get("index") or 0))
+    titles = titles_for(place, raw)
+    chosen, index = next_title(title, int(state.get("index") or 0), titles, changed)
+    where = place["label"] if place else (raw or "général")
     if chosen == title:
-        log("titre déjà en place")
+        log(f"titre déjà en place ({where})")
         return 0
-    log(f"{'aperçu' if dry else 'titre'} → {chosen}")
+    log(f"{'aperçu' if dry else 'titre'} [{where}] → {chosen}")
     if dry:
         return 0
     helix(
@@ -152,7 +180,12 @@ def main() -> int:
     STATE.parent.mkdir(parents=True, exist_ok=True)
     STATE.write_text(
         json.dumps(
-            {"index": index, "at": datetime.now(timezone.utc).isoformat(), "title": chosen},
+            {
+                "index": index,
+                "place": place_key,
+                "at": datetime.now(timezone.utc).isoformat(),
+                "title": chosen,
+            },
             ensure_ascii=False,
         ),
         encoding="utf-8",
