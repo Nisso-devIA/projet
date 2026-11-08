@@ -1,0 +1,16 @@
+[Unit]
+Description=OBS overlay for the Twitch viewer count
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk/overlay
+Environment=ZAEL_ROOT=/home/ubuntu/zaeldryk
+Environment=FOLLOW_GOAL=100
+ExecStart=/usr/bin/python3 /home/ubuntu/zaeldryk/overlay/serve-viewers.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

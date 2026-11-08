@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Dernier don</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet" />
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      container-type: size;
+    }
+    body.fond { background: #102418; }
+    .nom {
+      box-sizing: border-box;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 0 6%;
+      text-align: center;
+      font-family: Cinzel, "Times New Roman", serif;
+      font-size: 34cqh;
+      line-height: 1.05;
+      color: #f4e2a8;
+      text-shadow: 0 2px 0 #3a250c;
+    }
+    .montant { font-size: 0.72em; letter-spacing: 0.04em; }
+  </style>
+</head>
+<body>
+  <div class="nom" id="nom">—</div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    if (params.has("fond")) document.body.classList.add("fond");
+    const nom = document.getElementById("nom");
+    function euros(bits) {
+      const value = (Number(bits) || 0) / 100;
+      if (value >= 1 && value % 1 === 0) return value.toFixed(0) + " €";
+      if (value >= 1) return value.toFixed(1).replace(".", ",") + " €";
+      return (Number(bits) || 0) + " bits";
+    }
+    function show(row) {
+      if (!row || !row.name) {
+        nom.textContent = "—";
+        return;
+      }
+      nom.innerHTML = "";
+      const name = document.createElement("div");
+      name.textContent = row.name;
+      const amount = document.createElement("div");
+      amount.className = "montant";
+      amount.textContent = euros(row.bits);
+      nom.append(name, amount);
+    }
+    if (params.has("demo")) {
+      show({ name: "Ruto", bits: 500 });
+    } else {
+      async function tick() {
+        try {
+          const res = await fetch("/activity", { cache: "no-store" });
+          const data = await res.json();
+          show((data.donations || [])[0]);
+        } catch (err) { /* la plaque reste vide */ }
+      }
+      tick();
+      setInterval(tick, 3000);
+    }
+  </script>
+</body>
+</html>

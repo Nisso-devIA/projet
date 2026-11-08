@@ -1,0 +1,8 @@
+[Unit]
+Description=Rotate the Twitch title during a Zelda OOT live
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk/tools
+ExecStart=/usr/bin/python3 /home/ubuntu/zaeldryk/tools/rotate-stream-title.py

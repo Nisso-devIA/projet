@@ -100,8 +100,17 @@ zael_send_chat() {
 }
 
 # Sets globals: STREAM_JSON IS_LIVE STREAM_TITLE STREAM_GAME STREAM_MODE
+# Returns 1 when Helix did not return a data array. A 401/500 must not look
+# like "offline": jq length of a missing .data is 0.
 zael_fetch_stream() {
   STREAM_JSON=$(zael_helix_get "/streams?user_id=$TWITCH_BROADCASTER_ID")
+  if ! echo "$STREAM_JSON" | jq -e '(.data | type) == "array"' >/dev/null 2>&1; then
+    STREAM_MODE="unknown"
+    IS_LIVE=""
+    STREAM_TITLE=""
+    STREAM_GAME=""
+    return 1
+  fi
   IS_LIVE=$(echo "$STREAM_JSON" | jq -r '.data | length')
   STREAM_TITLE=$(echo "$STREAM_JSON" | jq -r '.data[0].title // ""')
   STREAM_GAME=$(echo "$STREAM_JSON" | jq -r '.data[0].game_name // "Jeu non spécifié"')

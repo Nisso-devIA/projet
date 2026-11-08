@@ -70,6 +70,36 @@ maybe_end_message() {
   zael_send_chat "Merci d'avoir regardé ! 🙏 À très bientôt 👋" >>"$LOG" 2>&1 || true
 }
 
+# End actions only after the stream is gone for several polls.
+# A title with ending/brb/offline is still a live; one empty Helix reply is not.
+END_OFFLINE_POLLS="${END_OFFLINE_POLLS:-6}"
+
+update_end_message() {
+  local count saw
+  if [[ "$STREAM_MODE" == "live" || "$STREAM_MODE" == "ending" ]]; then
+    echo 0 > "$ZAEL_STATE/offline_streak.txt"
+    echo 1 > "$ZAEL_STATE/saw_live.txt"
+    return 0
+  fi
+  if [[ "$STREAM_MODE" != "offline" ]]; then
+    return 0
+  fi
+  count=$(cat "$ZAEL_STATE/offline_streak.txt" 2>/dev/null || echo 0)
+  count=$((count + 1))
+  echo "$count" > "$ZAEL_STATE/offline_streak.txt"
+  saw=$(cat "$ZAEL_STATE/saw_live.txt" 2>/dev/null || echo 0)
+  if [[ "$saw" != "1" ]]; then
+    return 0
+  fi
+  if (( count == END_OFFLINE_POLLS )); then
+    maybe_end_message
+    maybe_youtube_clips_enqueue
+    maybe_x_delete
+    maybe_discord_live_delete
+    echo 0 > "$ZAEL_STATE/saw_live.txt"
+  fi
+}
+
 maybe_x_post() {
   local title="$1"
   if [[ "${X_ENABLED}" != "1" ]]; then
@@ -111,7 +141,7 @@ maybe_discord_reminder() {
   if (( now - last < DISCORD_REMINDER_SECONDS )); then
     return 0
   fi
-  local msg="${DISCORD_REMINDER_MSG:-⚔️ Rejoins la communauté Zaelrys → https://discord.gg/tZt3G2jub57}"
+  local msg="${DISCORD_REMINDER_MSG:-⚔️ Rejoins la communauté Zaelrys → https://discord.gg/3vH2u7pme5}"
   zael_log "$LOG" "Discord reminder in Twitch chat"
   zael_send_chat "$msg" >>"$LOG" 2>&1 || true
   echo "$now" > "$ZAEL_STATE/last_discord_reminder.txt"
@@ -155,7 +185,10 @@ maybe_youtube_clips_enqueue() {
 }
 
 tick() {
-  zael_fetch_stream
+  if ! zael_fetch_stream; then
+    zael_log "$LOG" "Helix streams illisible — mode inchangé"
+    return 1
+  fi
   local prev
   prev=$(zael_read_mode)
   manage_offline_service "$STREAM_MODE"
@@ -164,18 +197,10 @@ tick() {
     zael_log "$LOG" "mode $prev → $STREAM_MODE | title=$STREAM_TITLE"
 
     if [[ "$STREAM_MODE" == "live" ]]; then
+      /usr/bin/python3 "$ZAEL_ROOT/tools/rotate-stream-title.py" >>"$LOG" 2>&1 || \
+        zael_log "$LOG" "titre au hasard ignoré"
       maybe_discord_live_announce
       maybe_x_post "$STREAM_TITLE"
-    fi
-
-    if [[ "$prev" == "live" && ( "$STREAM_MODE" == "ending" || "$STREAM_MODE" == "offline" ) ]]; then
-      maybe_end_message
-      maybe_youtube_clips_enqueue
-    fi
-
-    if [[ "$STREAM_MODE" != "live" ]]; then
-      maybe_x_delete
-      maybe_discord_live_delete
     fi
 
     zael_write_mode "$STREAM_MODE"
@@ -189,11 +214,12 @@ tick() {
     maybe_youtube_clips_remember_title
   fi
 
-  if [[ "$STREAM_MODE" != "live" ]]; then
-    maybe_x_delete
-    maybe_discord_live_delete
-  fi
+  update_end_message
 }
+
+if [[ "${ZAEL_ORCH_SOURCE_ONLY:-}" == "1" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 zael_log "$LOG" "Orchestrator started (poll=${POLL_INTERVAL}s)"
 while true; do

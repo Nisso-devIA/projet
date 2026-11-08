@@ -9,8 +9,50 @@ from typing import List, Sequence
 from score_highlights import Segment
 
 
+SHORT_W = 1080
+SHORT_H = 1920
+
+
 def _run(cmd: List[str]) -> None:
     subprocess.run(cmd, check=True, capture_output=True)
+
+
+def video_size(path: Path) -> tuple[int, int]:
+    out = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=p=0:s=x",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    w, h = out.stdout.strip().split("x")
+    return int(w), int(h)
+
+
+def short_video_filter(src_w: int, src_h: int) -> str:
+    """9:16 Short. Landscape gameplay stays fully visible, centered on a blurred fill."""
+    if src_h > src_w:
+        return (
+            f"[0:v]scale={SHORT_W}:{SHORT_H}:force_original_aspect_ratio=decrease,"
+            f"pad={SHORT_W}:{SHORT_H}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v]"
+        )
+    return (
+        "[0:v]split[bg][fg];"
+        f"[bg]scale={SHORT_W}:{SHORT_H}:force_original_aspect_ratio=increase,"
+        f"crop={SHORT_W}:{SHORT_H},boxblur=18:1,setsar=1[bgb];"
+        f"[fg]scale={SHORT_W}:-2:force_original_aspect_ratio=decrease,setsar=1[fgg];"
+        "[bgb][fgg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]"
+    )
 
 
 def cut_segment(vod: Path, seg: Segment, out: Path) -> Path:
@@ -87,17 +129,14 @@ def render_short(
     out: Path,
     music_volume: float,
 ) -> Path:
-    """Center-crop vertical 1080x1920 + music."""
+    """YouTube Short 1080x1920. The whole game stays in frame."""
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".tmp.mp4")
     dur = max(1.0, seg.duration)
     vol = max(0.01, min(0.5, music_volume))
-    vfilt = (
-        "scale=1080:1920:force_original_aspect_ratio=increase,"
-        "crop=1080:1920,setsar=1"
-    )
+    src_w, src_h = video_size(vod)
     filt = (
-        f"[0:v]{vfilt}[v];"
+        f"{short_video_filter(src_w, src_h)};"
         f"[1:a]volume={vol},aloop=loop=-1:size=2e+09[m];"
         f"[0:a][m]amix=inputs=2:duration=first:dropout_transition=2[a]"
     )

@@ -864,8 +864,9 @@ async def on_ready():
 )
 async def annonce_cmd(
     interaction: discord.Interaction,
-    ping: app_commands.Choice[str],
+    ping: app_commands.Choice[str] | None = None,
 ):
+    print(f"/annonce par {interaction.user} ping={getattr(ping, 'value', None)}", flush=True)
     if not isinstance(interaction.user, discord.Member) or not can_announce(interaction.user):
         await interaction.response.send_message(
             "⛔ Réservé à l’owner / staff (⚔️ Sentinelle).",
@@ -873,8 +874,21 @@ async def annonce_cmd(
         )
         return
     await interaction.response.send_modal(
-        AnnonceModal(ping_everyone=(ping.value == "yes"))
+        AnnonceModal(ping_everyone=(ping is not None and ping.value == "yes"))
     )
+
+
+@bot.tree.error
+async def on_tree_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    print(f"Slash error: {error}", flush=True)
+    text = f"❌ {error}"[:1800]
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(text, ephemeral=True)
+        else:
+            await interaction.response.send_message(text, ephemeral=True)
+    except Exception as exc:
+        print(f"Slash error reply failed: {exc}", flush=True)
 
 
 @bot.tree.command(
@@ -1101,5 +1115,16 @@ async def update_member_counters(guild):
         if ch_b.name != new_name:
             await ch_b.edit(name=new_name)
 
+
+try:
+    import sys
+
+    sys.path.insert(0, str(Path("/home/ubuntu/zaeldryk")))
+    from clips.bot_hooks import register_clip_commands
+
+    register_clip_commands(bot)
+    print("clip commands registered", flush=True)
+except Exception as exc:
+    print(f"clip commands not registered: {exc}", flush=True)
 
 bot.run(BOT_TOKEN)

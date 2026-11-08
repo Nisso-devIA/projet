@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Objectif followers</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet" />
+  <style>
+    html, body {
+      margin: 0;
+      background: transparent;
+      width: 560px;
+      height: 168px;
+    }
+    body.fond { background: #07140d; }
+    .plaque {
+      box-sizing: border-box;
+      width: 540px;
+      height: 148px;
+      margin: 10px;
+      padding: 14px 18px 16px;
+      color: #f0d48a;
+      background:
+        linear-gradient(180deg, rgba(240, 212, 138, 0.16), transparent 32%),
+        linear-gradient(180deg, #1a4a32, #102418 58%, #0b1a12);
+      border: 2px solid #f0d48a;
+      border-radius: 10px;
+      box-shadow:
+        0 0 0 4px #143222,
+        0 0 0 6px #a67c2d,
+        inset 0 0 18px rgba(0, 0, 0, 0.45);
+      font-family: Cinzel, "Times New Roman", serif;
+    }
+    .kicker {
+      font-size: 13px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: #d9c48a;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-top: 6px;
+    }
+    .hearts {
+      width: 42px;
+      height: 36px;
+      flex: none;
+      position: relative;
+    }
+    .hearts span {
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      background: #f0d48a;
+      transform: rotate(45deg);
+      border-radius: 3px 0 0 0;
+      box-shadow: inset -6px -6px 0 #c9a24a;
+    }
+    .hearts span::before,
+    .hearts span::after {
+      content: "";
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      background: #f4e2a8;
+      border-radius: 50%;
+    }
+    .hearts span::before { left: -11px; top: 0; }
+    .hearts span::after { left: 0; top: -11px; }
+    .hearts span.back { left: 2px; top: 12px; opacity: 0.55; }
+    .hearts span.front { left: 14px; top: 6px; }
+    .headline {
+      font-size: 26px;
+      line-height: 1.05;
+      color: #f0d48a;
+      text-shadow: 0 2px 0 #6a4a16;
+    }
+    .sub {
+      margin-top: 2px;
+      font-size: 15px;
+      letter-spacing: 0.06em;
+      color: #efe6c8;
+    }
+    .track {
+      margin-top: 12px;
+      height: 14px;
+      border-radius: 99px;
+      background: #2a241c;
+      border: 1px solid #a67c2d;
+      overflow: hidden;
+    }
+    .fill {
+      height: 100%;
+      width: 0;
+      border-radius: 99px;
+      background: linear-gradient(90deg, #1fa85a, #b6ff8a);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+    }
+  </style>
+</head>
+<body>
+  <div class="plaque">
+    <div class="kicker">Objectif</div>
+    <div class="row">
+      <div class="hearts" aria-hidden="true"><span class="back"></span><span class="front"></span></div>
+      <div>
+        <div class="headline" id="headline">—</div>
+        <div class="sub" id="sub">followers</div>
+      </div>
+    </div>
+    <div class="track"><div class="fill" id="fill"></div></div>
+  </div>
+  <script>
+    if (new URLSearchParams(location.search).has("fond")) {
+      document.body.classList.add("fond");
+    }
+    const headline = document.getElementById("headline");
+    const sub = document.getElementById("sub");
+    const fill = document.getElementById("fill");
+
+    function show(data) {
+      const have = Number(data.followers || 0);
+      const goal = Math.max(1, Number(data.goal || 100));
+      const left = Math.max(0, goal - have);
+      const pct = Math.max(0, Math.min(100, (have / goal) * 100));
+      fill.style.width = pct + "%";
+      if (left === 0) {
+        headline.textContent = "Objectif atteint !";
+      } else {
+        headline.textContent = "Plus que " + left + (left > 1 ? " followers !" : " follower !");
+      }
+      sub.textContent = have + "/" + goal + " followers";
+    }
+
+    async function tick() {
+      try {
+        const res = await fetch("/followers", { cache: "no-store" });
+        show(await res.json());
+      } catch (err) {
+        headline.textContent = "—";
+      }
+    }
+    tick();
+    setInterval(tick, 20000);
+  </script>
+</body>
+</html>

@@ -260,6 +260,12 @@ def process_vod(
 
 def main() -> int:
     settings = Settings()
+    if not settings.upload_enabled:
+        log(
+            settings,
+            "YOUTUBE_CLIPS_UPLOAD=0 — uploads paused, queue and videos left untouched",
+        )
+        return 0
     if not settings.enabled:
         log(settings, "YOUTUBE_CLIPS_ENABLED=0 — exit")
         return 0

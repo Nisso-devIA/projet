@@ -2,6 +2,7 @@ import { config, isOwner } from "./config.js";
 import { displayPhone, isGroupJid } from "./text.js";
 import { formatLastReads } from "./read-receipts.js";
 import { postTestStory } from "./status-post.js";
+import { formatStatusViews } from "./status-views.js";
 import { sendChatReply } from "./chat-send.js";
 
 function helpText() {
@@ -17,6 +18,7 @@ function helpText() {
     `• ${config.prefix}transcrire — transcrire un vocal (répondre au message)`,
     `• ${config.prefix}lectures — voir qui a lu tes messages (mode discret)`,
     `• ${config.prefix}story — tester une story WhatsApp`,
+    `• ${config.prefix}vues — qui a ouvert le dernier statut`,
     "",
     "Conversations *stealth* : pas de bleu pour l'autre, mais alerte quand il lit tes messages.",
     "Stories live Twitch : vrai live seulement (titre sans offline) → story début/fin.",
@@ -65,6 +67,15 @@ const commands = {
   lu: ({ jid }) => {
     if (!isOwner(jid)) return "Réservé au propriétaire.";
     return formatLastReads();
+  },
+
+  vues: ({ jid, fromMe }) => {
+    if (!isOwner(jid) && !fromMe) return "Réservé au propriétaire.";
+    return formatStatusViews();
+  },
+  statut: ({ jid, fromMe }) => {
+    if (!isOwner(jid) && !fromMe) return "Réservé au propriétaire.";
+    return formatStatusViews();
   },
 
   story: async ({ sock, jid, fromMe }) => {

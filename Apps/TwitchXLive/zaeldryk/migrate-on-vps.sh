@@ -29,7 +29,7 @@ TWITCH_LOGIN=zaeldryk
 TWITCH_TOKEN_FILE=/home/ubuntu/twitch_token.txt
 OFFLINE_SERVICE=twitch-offline.service
 DISCORD_REMINDER_SECONDS=900
-DISCORD_REMINDER_MSG='⚔️ Rejoins la communauté Zaelrys → https://discord.gg/tZt3G2jub57'
+DISCORD_REMINDER_MSG='⚔️ Rejoins la communauté Zaelrys → https://discord.gg/3vH2u7pme5'
 EOF
 chmod 600 "$ROOT/config/twitch.env"
 

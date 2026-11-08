@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,51 +74,74 @@ def parse_iso(ts: str) -> datetime:
     return datetime.fromisoformat(ts).astimezone(timezone.utc)
 
 
+def same_instant(left: Optional[str], right: Optional[str]) -> bool:
+    if left == right:
+        return True
+    if not left or not right:
+        return False
+    try:
+        return parse_iso(left) == parse_iso(right)
+    except ValueError:
+        return False
+
+
+def segment_from_twitch(seg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if seg.get("cancelled_until"):
+        return None
+    seg_id = seg.get("id")
+    start = seg.get("start_time")
+    end = seg.get("end_time")
+    title = (seg.get("title") or "Live Zaeldryk").strip()
+    if not seg_id or not start or not end:
+        return None
+    return {
+        "id": str(seg_id),
+        "start_time": start,
+        "end_time": end,
+        "title": title,
+        "game": (seg.get("category") or {}).get("name") or "Non spécifié",
+        "is_recurring": bool(seg.get("is_recurring")),
+    }
+
+
 def fetch_twitch_segments(cfg: Dict[str, str]) -> List[Dict[str, Any]]:
     token_file = cfg.get("TWITCH_TOKEN_FILE", "/home/ubuntu/twitch_token.txt")
     token = Path(token_file).read_text(encoding="utf-8").strip()
     broadcaster_id = cfg.get("TWITCH_BROADCASTER_ID", "426411773")
     first = cfg.get("SCHEDULE_TWITCH_FIRST", "25")
+    headers = {
+        "Client-ID": cfg["TWITCH_CLIENT_ID"],
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "ZaelrysScheduleSync/1.0",
+    }
 
-    url = f"{TWITCH_API}/schedule?broadcaster_id={broadcaster_id}&first={first}"
-    status, payload = http_json(
-        "GET",
-        url,
-        {
-            "Client-ID": cfg["TWITCH_CLIENT_ID"],
-            "Authorization": f"Bearer {token}",
-            "User-Agent": "ZaelrysScheduleSync/1.0",
-        },
-    )
-    if status == 404:
-        log("Twitch: aucun créneau planifié (configure le planning sur dashboard Twitch)")
-        return []
-    if status != 200:
-        raise RuntimeError(f"Twitch schedule HTTP {status}: {payload}")
-
-    data = payload.get("data", {}) if isinstance(payload, dict) else {}
-    segments = data.get("segments") or []
     out: List[Dict[str, Any]] = []
-    for seg in segments:
-        if seg.get("cancelled_until"):
-            continue
-        seg_id = seg.get("id")
-        start = seg.get("start_time")
-        end = seg.get("end_time")
-        title = (seg.get("title") or "Live Zaeldryk").strip()
-        if not seg_id or not start or not end:
-            continue
-        out.append(
-            {
-                "id": str(seg_id),
-                "start_time": start,
-                "end_time": end,
-                "title": title,
-                "game": (seg.get("category") or {}).get("name") or "Non spécifié",
-                "is_recurring": bool(seg.get("is_recurring")),
-            }
-        )
-    return out
+    cursor: Optional[str] = None
+    seen_cursors: set[str] = set()
+    for page in range(20):
+        query = {"broadcaster_id": broadcaster_id, "first": first}
+        if cursor:
+            query["after"] = cursor
+        url = f"{TWITCH_API}/schedule?{urllib.parse.urlencode(query)}"
+        status, payload = http_json("GET", url, headers)
+        if status == 404 and page == 0:
+            log("Twitch: aucun créneau planifié (configure le planning sur dashboard Twitch)")
+            return []
+        if status != 200 or not isinstance(payload, dict):
+            raise RuntimeError(f"Twitch schedule HTTP {status}: {payload}")
+
+        cursor = (payload.get("pagination") or {}).get("cursor") or None
+        if cursor and cursor in seen_cursors:
+            return out
+        segments = (payload.get("data") or {}).get("segments") or []
+        for seg in segments:
+            item = segment_from_twitch(seg)
+            if item:
+                out.append(item)
+        if not cursor or not segments:
+            return out
+        seen_cursors.add(cursor)
+    raise RuntimeError("Twitch schedule: pagination trop longue")
 
 
 def fetch_discord_events(token: str, guild_id: str) -> List[Dict[str, Any]]:
@@ -225,8 +249,12 @@ def delete_event(token: str, guild_id: str, event_id: str) -> None:
 def event_needs_update(existing: Dict[str, Any], desired: dict) -> bool:
     checks = (
         existing.get("name") != desired["name"],
-        existing.get("scheduled_start_time") != desired["scheduled_start_time"],
-        existing.get("scheduled_end_time") != desired["scheduled_end_time"],
+        not same_instant(
+            existing.get("scheduled_start_time"), desired["scheduled_start_time"]
+        ),
+        not same_instant(
+            existing.get("scheduled_end_time"), desired["scheduled_end_time"]
+        ),
         (existing.get("description") or "") != desired["description"],
         (existing.get("entity_metadata") or {}).get("location")
         != desired["entity_metadata"]["location"],

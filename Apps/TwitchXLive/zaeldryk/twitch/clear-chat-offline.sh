@@ -5,7 +5,15 @@ ZAEL_ROOT="${ZAEL_ROOT:-/home/ubuntu/zaeldryk}"
 source "$ZAEL_ROOT/lib/common.sh"
 
 LOG="$ZAEL_LOGS/clear-chat.log"
-zael_fetch_stream
+if ! zael_fetch_stream; then
+  zael_log "$LOG" "Helix illisible → pas de clear"
+  exit 0
+fi
+
+if [[ "$IS_LIVE" != "0" ]]; then
+  zael_log "$LOG" "Live encore en cours → pas de clear"
+  exit 0
+fi
 
 if [[ "$STREAM_MODE" != "ending" ]]; then
   zael_log "$LOG" "Pas en mode ending → pas de clear"

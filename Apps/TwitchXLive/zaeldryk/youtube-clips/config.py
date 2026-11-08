@@ -42,6 +42,8 @@ class Settings:
         c = cfg or load_config()
         self.enabled = c.get("YOUTUBE_CLIPS_ENABLED", "1") == "1"
         self.dry_run = c.get("YOUTUBE_CLIPS_DRY_RUN", "0") == "1"
+        # Absent or 0: do not upload, do not drain the queue, do not delete videos.
+        self.upload_enabled = c.get("YOUTUBE_CLIPS_UPLOAD", "0") == "1"
         self.skip_pattern = re.compile(
             c.get("YOUTUBE_CLIPS_SKIP_TITLE_PATTERN", DEFAULT_SKIP),
             re.IGNORECASE,

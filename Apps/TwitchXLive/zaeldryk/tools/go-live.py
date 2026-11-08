@@ -2,35 +2,49 @@
 """Lance un preset de live : titre + catégorie Twitch. OBS suit si le WebSocket est ouvert."""
 from __future__ import annotations
 
-import json
+import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
 
-KEY = Path(r"C:\Users\nacim\Documents\projet\vps to\ssh-key-ovh-2026-08-28")
 VPS = "ubuntu@57.128.177.132"
 REMOTE = "/home/ubuntu/zaeldryk/tools/set-stream-title.py"
-OBS_SCENE = {
-    "zelda": "Scène",
-    "ocarina": "Scène",
-    "oot": "Scène",
-    "witcher": "Scène",
-    "mario": "Scène",
-}
+
+
+def ssh_key() -> Path:
+    env = os.environ.get("ZAEL_SSH_KEY", "").strip()
+    if env:
+        return Path(env)
+    names = ("vps to", "ssh-key-ovh-2026-08-28")
+    repo_key = Path(__file__).resolve().parents[4].joinpath(*names)
+    windows_key = Path(r"C:\Users\nacim\Documents\projet").joinpath(*names)
+    for candidate in (repo_key, windows_key):
+        if candidate.is_file():
+            return candidate
+    return repo_key
+
+
+def remote_command(game: str, apply: bool) -> str:
+    parts = ["python3", REMOTE, game]
+    if apply:
+        parts.append("--apply")
+    return " ".join(shlex.quote(part) for part in parts)
 
 
 def twitch(game: str, apply: bool) -> int:
-    remote = "python3 " + REMOTE + " " + json.dumps(game)
-    if apply:
-        remote += " --apply"
+    key = ssh_key()
+    if not key.is_file():
+        print(f"clé SSH introuvable : {key}")
+        return 1
     cmd = [
         "ssh",
         "-i",
-        str(KEY),
+        str(key),
         "-o",
-        "StrictHostKeyChecking=no",
+        "StrictHostKeyChecking=accept-new",
         VPS,
-        remote,
+        remote_command(game, apply),
     ]
     return subprocess.call(cmd)
 
@@ -53,14 +67,9 @@ def obs_scene(game: str) -> None:
     cfg = obs_env()
     host = cfg.get("OBS_HOST", "")
     if not host:
-        print("obs non contacte : il est sur l autre PC. Titre et categorie Twitch seulement.")
+        print("obs non contacte pour", game, ": titre et categorie Twitch seulement.")
         return
-    low = game.lower()
     scene = cfg.get("OBS_SCENE") or "Scène"
-    for key, name in OBS_SCENE.items():
-        if key in low:
-            scene = name
-            break
     try:
         import obsws_python as obs
     except ImportError:

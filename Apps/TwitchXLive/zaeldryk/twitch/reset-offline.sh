@@ -19,7 +19,10 @@ fi
 
 zael_log "$LOG" "Reset offline en cours..."
 
-zael_fetch_stream
+if ! zael_fetch_stream; then
+  zael_log "$LOG" "Helix illisible → skip reset"
+  exit 0
+fi
 if [[ "$STREAM_MODE" == "live" ]]; then
   zael_log "$LOG" "Vrai LIVE en cours → skip reset"
   exit 0
