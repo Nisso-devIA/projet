@@ -99,11 +99,26 @@
       }
       return rupeeFile(eurosFromBits(row.bits));
     }
+    let currentSound = null;
+    let soundHint = null;
+    function markSoundReady() {
+      if (soundHint) soundHint.remove();
+      soundHint = null;
+    }
     function playSound(src) {
       const audio = new Audio(src);
       audio.volume = 1;
-      audio.play().catch(() => {});
+      currentSound = audio;
+      const attempt = audio.play();
+      if (attempt && attempt.then) {
+        attempt.then(markSoundReady).catch(() => {});
+      }
     }
+    document.addEventListener("pointerdown", () => {
+      if (!currentSound) return;
+      currentSound.currentTime = 0;
+      currentSound.play().then(markSoundReady).catch(() => {});
+    });
     function render(kind, row) {
       const box = document.createElement("div");
       box.className = "alert" + (row.prime ? " prime" : "");
@@ -114,6 +129,12 @@
       name.className = "name";
       name.textContent = row.name || "";
       box.append(kicker, name);
+      if (params.has("demo")) {
+        soundHint = document.createElement("div");
+        soundHint.className = "kicker";
+        soundHint.textContent = "Clique pour le son";
+        box.append(soundHint);
+      }
       slot.replaceChildren(box);
       playSound(soundFor(kind, row));
     }
