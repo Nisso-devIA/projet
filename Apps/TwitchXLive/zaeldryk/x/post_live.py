@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -52,9 +53,31 @@ def weighted_length(text: str) -> int:
     return total
 
 
+def strip_leading_emoji(title: str) -> str:
+    index = 0
+    while index < len(title):
+        char = title[index]
+        if char.isspace() or char in "\u200d\ufe0f\u200b":
+            index += 1
+            continue
+        if ord(char) > 0xFFFF or unicodedata.category(char) == "So":
+            index += 1
+            continue
+        break
+    return title[index:]
+
+
+def title_has_hey_listen(title: str) -> bool:
+    letters = []
+    for char in strip_leading_emoji(title):
+        letters.append(char.lower() if char.isalnum() else " ")
+    return "hey listen" in " ".join("".join(letters).split())
+
+
 def render_tweet(template: str, title: str) -> str:
     if "{titre}" not in template:
         return template
+    title = strip_leading_emoji(title)
     full = template.replace("{titre}", title)
     if weighted_length(full) <= TWEET_LIMIT:
         return full
@@ -77,6 +100,13 @@ def next_index(last: int | None) -> int:
     if last is None:
         return 0
     return (last + 1) % len(TEMPLATES)
+
+
+def choose_index(last: int | None, title: str) -> int:
+    index = next_index(last)
+    if index == 0 and title_has_hey_listen(title):
+        return 1
+    return index
 
 
 def read_index(path: Path) -> int | None:
@@ -130,7 +160,7 @@ def main() -> int:
 
     import tweepy
 
-    index = next_index(read_index(INDEX_FILE))
+    index = choose_index(read_index(INDEX_FILE), title)
     text = render_tweet(TEMPLATES[index], title)
     env = load_env()
     client = tweepy.Client(

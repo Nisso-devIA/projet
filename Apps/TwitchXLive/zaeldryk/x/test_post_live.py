@@ -12,10 +12,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from post_live import (  # noqa: E402
     TEMPLATES,
     TWEET_LIMIT,
+    choose_index,
     next_index,
     read_index,
     render_tweet,
     should_skip,
+    strip_leading_emoji,
+    title_has_hey_listen,
     weighted_length,
     write_index,
 )
@@ -40,6 +43,7 @@ class RenderTests(unittest.TestCase):
             text = render_tweet(template, SAMPLE)
             self.assertNotIn("{titre}", text)
             self.assertIn("Hey Listen", text)
+            self.assertNotIn("⚔️ 🧚", text)
             self.assertIn("https://www.twitch.tv/zaeldryk", text)
             self.assertLessEqual(weighted_length(text), TWEET_LIMIT)
 
@@ -68,6 +72,25 @@ class RenderTests(unittest.TestCase):
             "posted_at": (NOW - timedelta(minutes=3)).isoformat(),
         }
         self.assertTrue(should_skip(recent, "", "", NOW))
+
+    def test_leading_emoji_is_removed_from_the_title(self):
+        self.assertEqual(
+            strip_leading_emoji(SAMPLE),
+            "Hey Listen, je t'attends pour la suite de l'aventure, ne traîne pas 😉",
+        )
+        text = render_tweet(TEMPLATES[1], SAMPLE)
+        self.assertIn("🗡️ Hey Listen,", text)
+        self.assertNotIn("🧚 Hey Listen", text)
+
+    def test_hey_listen_skips_template_a_and_advances(self):
+        self.assertTrue(title_has_hey_listen("Hey, Listen !"))
+        self.assertTrue(title_has_hey_listen(SAMPLE))
+        self.assertFalse(title_has_hey_listen("On reprend le temple"))
+        self.assertEqual(choose_index(None, SAMPLE), 1)
+        self.assertEqual(choose_index(2, SAMPLE), 1)
+        self.assertEqual(choose_index(0, SAMPLE), 1)
+        self.assertEqual(choose_index(1, SAMPLE), 2)
+        self.assertEqual(choose_index(2, "On reprend le temple"), 0)
 
 
 if __name__ == "__main__":
