@@ -15,6 +15,7 @@ from discord.ext import commands
 
 from captcha_image import TTL_SECONDS, CaptchaGate, CooldownError, render_captcha_png
 from rules_message import BANNER_FILENAME, BANNER_PATH, rules_embed_dict
+from temp_voice import cleanup_empty_temp_channels, register_temp_voice
 
 CONFIG_PATH = Path("/home/ubuntu/zaeldryk/config/discord.env")
 XAI_ENV_PATH = Path("/home/ubuntu/zaeldryk/config/xai.env")
@@ -66,6 +67,7 @@ _purge_in_progress: Set[int] = set()
 intents.guilds = True
 intents.moderation = True
 intents.invites = True
+intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -1022,6 +1024,13 @@ async def on_ready():
     print("Captcha image handler registered: accept_rules + reglement messages", flush=True)
     print("Captcha ephemeral cleanup registered", flush=True)
     print(f"message_content intent: {bot.intents.message_content}", flush=True)
+    print(f"voice_states intent: {bot.intents.voice_states}", flush=True)
+    print("Temp voice handler registered", flush=True)
+    try:
+        removed = await cleanup_empty_temp_channels(bot)
+        print(f"Temp voice startup cleanup: {removed}", flush=True)
+    except Exception as exc:
+        print(f"Temp voice startup error: {exc}", flush=True)
     n_polls = register_live_poll_views()
     print(f"Live polls registered: {n_polls}", flush=True)
     try:
@@ -1387,4 +1396,5 @@ try:
 except Exception as exc:
     print(f"clip commands not registered: {exc}", flush=True)
 
+register_temp_voice(bot)
 bot.run(BOT_TOKEN)
