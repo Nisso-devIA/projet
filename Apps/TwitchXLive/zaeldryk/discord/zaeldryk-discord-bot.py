@@ -15,6 +15,7 @@ from discord.ext import commands
 
 from captcha_image import TTL_SECONDS, CaptchaGate, CooldownError, render_captcha_png
 from rules_message import BANNER_FILENAME, BANNER_PATH, rules_embed_dict
+from levels import handle_text_xp, register_level_commands, start_level_system
 from temp_voice import cleanup_empty_temp_channels, register_temp_voice
 
 CONFIG_PATH = Path("/home/ubuntu/zaeldryk/config/discord.env")
@@ -1031,6 +1032,10 @@ async def on_ready():
         print(f"Temp voice startup cleanup: {removed}", flush=True)
     except Exception as exc:
         print(f"Temp voice startup error: {exc}", flush=True)
+    try:
+        await start_level_system(bot)
+    except Exception as exc:
+        print(f"Level system startup error: {exc}", flush=True)
     n_polls = register_live_poll_views()
     print(f"Live polls registered: {n_polls}", flush=True)
     try:
@@ -1300,6 +1305,10 @@ async def on_member_update(before, after):
 
 @bot.event
 async def on_message(message: discord.Message):
+    try:
+        await handle_text_xp(message)
+    except Exception as exc:
+        print(f"Text XP error: {exc}", flush=True)
     channel = message.channel
     in_reglement = (
         message.guild is not None
@@ -1397,4 +1406,5 @@ except Exception as exc:
     print(f"clip commands not registered: {exc}", flush=True)
 
 register_temp_voice(bot)
+register_level_commands(bot)
 bot.run(BOT_TOKEN)
