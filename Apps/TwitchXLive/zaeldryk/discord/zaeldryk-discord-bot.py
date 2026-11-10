@@ -44,6 +44,7 @@ GUILD_ID = 867426693286461490
 ROLE_DISCIPLE = "🐺 Disciple"
 ROLE_STAFF = "⚔️ Sentinelle"
 CHANNEL_REGLEMENT = "📖-règlement"
+RULES_MESSAGE_ID = 1541280453942706267
 CHANNEL_BIENVENUE = "📜-bienvenue"
 CHANNEL_LOGS = "📝-logs"
 CHANNEL_MEMBERS_ID = 1541534998488813659  # ID salon 👥 Membres
@@ -742,6 +743,19 @@ async def flash_channel(channel: discord.abc.Messageable, text: str) -> None:
         print(f"captcha flash error: {exc}", flush=True)
 
 
+def reglement_noise(message: discord.Message) -> bool:
+    """Join, boost, app-added and other bots. Keep our rules and captcha replies."""
+    if message.id == RULES_MESSAGE_ID:
+        return False
+    me = bot.user
+    author = message.author
+    if me is not None and author is not None and author.id == me.id:
+        return False
+    if message.is_system():
+        return True
+    return bool(author is not None and author.bot)
+
+
 async def delete_member_message(message: discord.Message) -> None:
     if len(_bot_deleted_message_ids) > 500:
         _bot_deleted_message_ids.clear()
@@ -1188,13 +1202,18 @@ async def on_member_update(before, after):
 
 @bot.event
 async def on_message(message: discord.Message):
-    if message.author.bot:
-        return
     channel = message.channel
-    if (
+    in_reglement = (
         message.guild is not None
         and getattr(channel, "name", None) == CHANNEL_REGLEMENT
-        and not (isinstance(message.author, discord.Member) and is_staff(message.author))
+    )
+    if in_reglement and reglement_noise(message):
+        await delete_member_message(message)
+        return
+    if message.author.bot:
+        return
+    if in_reglement and not (
+        isinstance(message.author, discord.Member) and is_staff(message.author)
     ):
         await answer_captcha_message(message)
         return
@@ -1203,7 +1222,7 @@ async def on_message(message: discord.Message):
 
 @bot.event
 async def on_message_delete(message):
-    if message.id in _bot_deleted_message_ids:
+    if message.id in _bot_deleted_message_ids or getattr(message.channel, "name", None) == CHANNEL_REGLEMENT:
         _bot_deleted_message_ids.discard(message.id)
         return
     if message.guild and message.channel.id in _purge_in_progress:

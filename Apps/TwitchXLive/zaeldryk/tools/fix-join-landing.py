@@ -9,6 +9,7 @@ import discord
 
 CONFIG = Path("/home/ubuntu/zaeldryk/config/discord.env")
 CHANNEL_REGLEMENT = "📖-règlement"
+CHANNEL_BIENVENUE = "📜-bienvenue"
 GUILD_ID = 867426693286461490
 API = "https://discord.com/api/v10"
 
@@ -55,7 +56,7 @@ async def on_ready():
             guild.default_role,
             view_channel=True,
             read_message_history=True,
-            send_messages=False,
+            send_messages=True,
             add_reactions=True,
             embed_links=True,
             use_external_emojis=True,
@@ -66,7 +67,9 @@ async def on_ready():
         await reglement.edit(position=0, reason="join: réglement first in list")
         print(f"reglement position now={reglement.position}")
 
-        await guild.edit(system_channel=reglement, reason="join default system channel")
+        bienvenue = discord.utils.get(guild.text_channels, name=CHANNEL_BIENVENUE)
+        if bienvenue is not None:
+            await guild.edit(system_channel=bienvenue, reason="join notices go to bienvenue")
 
         # Welcome screen (community) — shown on join
         status, _ = await api(
