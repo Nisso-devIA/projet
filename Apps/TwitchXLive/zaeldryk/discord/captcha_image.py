@@ -53,7 +53,10 @@ class SubmitResult:
 
 
 def codes_match(given: str, expected: str) -> bool:
-    return given.strip().casefold() == expected.strip().casefold()
+    def normalize(value: str) -> str:
+        return "".join(value.split()).casefold()
+
+    return normalize(given) == normalize(expected)
 
 
 class CaptchaGate:

@@ -24,8 +24,8 @@ from captcha_image import (
 
 
 class MatchTests(unittest.TestCase):
-    def test_case_and_surrounding_space_match(self):
-        self.assertTrue(codes_match("  ab23k ", "AB23K"))
+    def test_case_and_spaces_match(self):
+        self.assertTrue(codes_match("  ab 23 k ", "AB23K"))
         self.assertFalse(codes_match("AB23K!", "AB23K"))
 
     def test_charset_has_no_ambiguous_glyphs(self):

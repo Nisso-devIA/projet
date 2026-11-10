@@ -666,12 +666,20 @@ def format_captcha_wait(seconds: float) -> str:
     return f"{secs} s"
 
 
+CAPTCHA_TYPE_HINT = (
+    "✍️ Tape le code dans la barre de message en bas de ce salon, "
+    "ton message sera effacé aussitôt."
+)
+_bot_deleted_message_ids: set[int] = set()
+
+
 def captcha_embed() -> discord.Embed:
     embed = discord.Embed(
         title="Vérification anti-bot",
         description=(
-            "Recopie les **6 caractères** de l’image.\n"
-            "Les majuscules et les minuscules comptent pareil.\n"
+            "Recopie les **6 caractères** de l’image dans ce salon.\n"
+            "Écris-les dans la barre de message en bas : ton message sera effacé aussitôt.\n"
+            "Les majuscules, les minuscules et les espaces comptent pareil.\n"
             "Le code expire dans **5 minutes**."
         ),
         color=CAPTCHA_GOLD,
@@ -685,22 +693,17 @@ def captcha_file(code: str) -> discord.File:
     return discord.File(io.BytesIO(render_captcha_png(code)), filename="captcha.png")
 
 
-async def grant_disciple_access(interaction: discord.Interaction) -> bool:
-    """Give Disciple role, welcome message, counters. Returns True on success."""
-    guild = interaction.guild
-    user = interaction.user
-    if guild is None or not isinstance(user, discord.Member):
-        return False
-
+async def grant_disciple_access(guild: discord.Guild, user: discord.Member) -> str | None:
+    """Give Disciple role, welcome message, counters. Returns an error, or None."""
     role = discord.utils.get(guild.roles, name=ROLE_DISCIPLE)
     if role is None:
-        await interaction.followup.send("Rôle introuvable.", ephemeral=True)
-        return False
+        return "Rôle introuvable."
     if role in user.roles:
-        await interaction.followup.send("Tu as déjà accepté le règlement.", ephemeral=True)
-        return False
+        _captcha_gate.clear(user.id)
+        return "Tu as déjà accepté le règlement."
 
     await user.add_roles(role)
+    _captcha_gate.clear(user.id)
 
     bienvenue = discord.utils.get(guild.text_channels, name=CHANNEL_BIENVENUE)
     if bienvenue:
@@ -713,81 +716,94 @@ async def grant_disciple_access(interaction: discord.Interaction) -> bool:
             ),
             color=discord.Color.gold(),
         )
-        welcome_img = Path("/home/ubuntu/zaeldryk/discord/assets/bienvenue_base.jpg")
-        if welcome_img.exists():
-            file = discord.File(welcome_img, filename="bienvenue.jpg")
-            embed.set_image(url="attachment://bienvenue.jpg")
-            await bienvenue.send(embed=embed, file=file)
-        else:
-            embed.set_image(url="https://i.imgur.com/tCDZtsy.jpeg")
-            await bienvenue.send(embed=embed)
-
-    await interaction.followup.send("✅ Accès débloqué", ephemeral=True)
+        try:
+            welcome_img = Path("/home/ubuntu/zaeldryk/discord/assets/bienvenue_base.jpg")
+            if welcome_img.exists():
+                file = discord.File(welcome_img, filename="bienvenue.jpg")
+                embed.set_image(url="attachment://bienvenue.jpg")
+                await bienvenue.send(embed=embed, file=file)
+            else:
+                embed.set_image(url="https://i.imgur.com/tCDZtsy.jpeg")
+                await bienvenue.send(embed=embed)
+        except discord.HTTPException as exc:
+            print(f"welcome send error: {exc}", flush=True)
 
     try:
         await update_member_counters(guild)
     except Exception:
         pass
-
-    _captcha_gate.clear(user.id)
-    return True
+    return None
 
 
-class CaptchaModal(discord.ui.Modal, title="Vérification anti-bot"):
-    def __init__(self, user_id: int, captcha_id: str):
-        super().__init__()
-        self.user_id = user_id
-        self.captcha_id = captcha_id
-        self.answer_input = discord.ui.TextInput(
-            label="Code affiché sur l’image",
-            placeholder="6 caractères",
-            min_length=1,
-            max_length=12,
-            required=True,
-        )
-        self.add_item(self.answer_input)
+async def flash_channel(channel: discord.abc.Messageable, text: str) -> None:
+    try:
+        await channel.send(text, delete_after=5)
+    except discord.HTTPException as exc:
+        print(f"captcha flash error: {exc}", flush=True)
 
-    async def on_submit(self, interaction: discord.Interaction):
-        result = _captcha_gate.submit(
-            self.user_id,
-            self.captcha_id,
-            str(self.answer_input.value),
-        )
-        if result.status == "ok":
-            await interaction.response.defer(ephemeral=True)
-            await grant_disciple_access(interaction)
-            return
-        if result.status == "wrong":
-            await interaction.response.send_message(
-                f"❌ Incorrect. Il reste {result.left} tentative(s).",
-                ephemeral=True,
+
+async def delete_member_message(message: discord.Message) -> None:
+    if len(_bot_deleted_message_ids) > 500:
+        _bot_deleted_message_ids.clear()
+    _bot_deleted_message_ids.add(message.id)
+    try:
+        await message.delete()
+    except discord.HTTPException as exc:
+        _bot_deleted_message_ids.discard(message.id)
+        print(f"captcha delete error: {exc}", flush=True)
+
+
+async def answer_captcha_message(message: discord.Message) -> None:
+    """Delete a #règlement message, then check it if a captcha is pending."""
+    content = message.content or ""
+    author = message.author
+    await delete_member_message(message)
+    if not isinstance(author, discord.Member) or message.guild is None:
+        return
+
+    session = _captcha_gate.sessions.get(author.id)
+    if session is None:
+        remaining = _captcha_gate.cooldown_remaining(author.id)
+        if remaining > 0:
+            await flash_channel(
+                message.channel,
+                f"⏳ Trop d’échecs. Nouveau captcha dans {format_captcha_wait(remaining)}.",
             )
-            return
-        if result.status == "locked":
-            await interaction.response.send_message(
-                "❌ Trop d’échecs. Réessaie dans 2 minutes.",
-                ephemeral=True,
-            )
-            try:
-                await send_log(
-                    interaction.guild,
-                    "🤖 Captcha échoué",
-                    f"{interaction.user.mention} — {result.attempts} échecs",
-                    discord.Color.red(),
-                )
-            except Exception:
-                pass
-            return
-        if result.status == "expired":
-            await interaction.response.send_message(
-                "⏳ Ce captcha a expiré. Clique sur **Nouveau captcha**.",
-                ephemeral=True,
-            )
-            return
-        await interaction.response.send_message(
-            "Ce captcha n’est plus valable. Clique sur **Nouveau captcha**.",
-            ephemeral=True,
+        return
+
+    result = _captcha_gate.submit(author.id, session.captcha_id, content)
+    if result.status == "ok":
+        error = await grant_disciple_access(message.guild, author)
+        await flash_channel(message.channel, error or "✅ Accès débloqué")
+        return
+    if result.status == "wrong":
+        await flash_channel(
+            message.channel,
+            f"❌ Incorrect. Il reste {result.left} tentative(s).",
         )
+        return
+    if result.status == "locked":
+        await flash_channel(message.channel, "❌ Trop d’échecs. Réessaie dans 2 minutes.")
+        try:
+            await send_log(
+                message.guild,
+                "🤖 Captcha échoué",
+                f"{author.mention} — {result.attempts} échecs",
+                discord.Color.red(),
+            )
+        except Exception:
+            pass
+        return
+    if result.status == "expired":
+        await flash_channel(
+            message.channel,
+            "⏳ Ce captcha a expiré. Clique sur **Nouveau captcha**.",
+        )
+        return
+    await flash_channel(
+        message.channel,
+        "Ce captcha n’est plus valable. Clique sur **Nouveau captcha**.",
+    )
 
 
 class CaptchaPromptView(discord.ui.View):
@@ -825,7 +841,7 @@ class CaptchaPromptView(discord.ui.View):
                 ephemeral=True,
             )
             return
-        await interaction.response.send_modal(CaptchaModal(self.user_id, self.captcha_id))
+        await interaction.response.send_message(CAPTCHA_TYPE_HINT, ephemeral=True)
 
     @discord.ui.button(label="Nouveau captcha", style=discord.ButtonStyle.secondary)
     async def new_captcha(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -901,7 +917,8 @@ class AcceptRulesView(discord.ui.View):
 async def on_ready():
     print(f"Zaelrys Discord Bot connecté : {bot.user}", flush=True)
     bot.add_view(AcceptRulesView())
-    print("Captcha image handler registered: accept_rules", flush=True)
+    print("Captcha image handler registered: accept_rules + reglement messages", flush=True)
+    print(f"message_content intent: {bot.intents.message_content}", flush=True)
     n_polls = register_live_poll_views()
     print(f"Live polls registered: {n_polls}", flush=True)
     try:
@@ -1170,7 +1187,25 @@ async def on_member_update(before, after):
 
 
 @bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot:
+        return
+    channel = message.channel
+    if (
+        message.guild is not None
+        and getattr(channel, "name", None) == CHANNEL_REGLEMENT
+        and not (isinstance(message.author, discord.Member) and is_staff(message.author))
+    ):
+        await answer_captcha_message(message)
+        return
+    await bot.process_commands(message)
+
+
+@bot.event
 async def on_message_delete(message):
+    if message.id in _bot_deleted_message_ids:
+        _bot_deleted_message_ids.discard(message.id)
+        return
     if message.guild and message.channel.id in _purge_in_progress:
         return
     if message.guild and message.author and not message.author.bot:
