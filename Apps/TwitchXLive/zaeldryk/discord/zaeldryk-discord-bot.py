@@ -991,38 +991,28 @@ class AcceptRulesView(discord.ui.View):
         remember_captcha_prompt(interaction.user.id, session.captcha_id, interaction)
 
 
-def rules_embed(image_url: str | None = None) -> discord.Embed:
+def rules_embed() -> discord.Embed:
     data = rules_embed_dict()
     embed = discord.Embed(
-        title=data["title"],
         description=data["description"],
         color=discord.Color(data["color"]),
     )
     embed.set_footer(text=data["footer"]["text"])
-    if image_url:
-        embed.set_image(url=image_url)
     return embed
 
 
 async def publish_rules_message(channel: discord.TextChannel, message_id: int = RULES_MESSAGE_ID):
     """Edit the rules post in place, or send it if that message is gone.
 
-    The file is kept in the attachments list and also used as the large embed image.
+    The banner stays a normal attachment above the embed. The embed has no title and no image.
     """
     view = AcceptRulesView()
     banner = discord.File(BANNER_PATH, filename=BANNER_FILENAME)
     try:
         message = await channel.fetch_message(message_id)
-        message = await message.edit(embed=rules_embed(), attachments=[banner], view=view)
     except discord.NotFound:
-        message = await channel.send(embed=rules_embed(), file=banner, view=view)
-    if not message.attachments:
-        return message
-    return await message.edit(
-        embed=rules_embed(message.attachments[0].url),
-        attachments=message.attachments,
-        view=view,
-    )
+        return await channel.send(embed=rules_embed(), file=banner, view=view)
+    return await message.edit(embed=rules_embed(), attachments=[banner], view=view)
 
 
 @bot.event
