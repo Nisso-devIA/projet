@@ -1,7 +1,8 @@
 import asyncio
+import io
 import json
+import math
 import os
-import random
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -11,6 +12,8 @@ from typing import Dict, Set
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+from captcha_image import TTL_SECONDS, CaptchaGate, CooldownError, render_captcha_png
 
 CONFIG_PATH = Path("/home/ubuntu/zaeldryk/config/discord.env")
 XAI_ENV_PATH = Path("/home/ubuntu/zaeldryk/config/xai.env")
@@ -651,8 +654,35 @@ class AnnonceModal(discord.ui.Modal, title="Annonce (générée par Grok)"):
         )
 
 
-CAPTCHA_MAX_ATTEMPTS = 3
-_captcha_failures: Dict[int, int] = {}
+_captcha_gate = CaptchaGate()
+CAPTCHA_GOLD = discord.Color.gold()
+
+
+def format_captcha_wait(seconds: float) -> str:
+    total = max(1, math.ceil(seconds))
+    minutes, secs = divmod(total, 60)
+    if minutes:
+        return f"{minutes} min {secs:02d} s"
+    return f"{secs} s"
+
+
+def captcha_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="Vérification anti-bot",
+        description=(
+            "Recopie les **6 caractères** de l’image.\n"
+            "Les majuscules et les minuscules comptent pareil.\n"
+            "Le code expire dans **5 minutes**."
+        ),
+        color=CAPTCHA_GOLD,
+    )
+    embed.set_image(url="attachment://captcha.png")
+    embed.set_footer(text="3 tentatives par image · 2 minutes d’attente ensuite")
+    return embed
+
+
+def captcha_file(code: str) -> discord.File:
+    return discord.File(io.BytesIO(render_captcha_png(code)), filename="captcha.png")
 
 
 async def grant_disciple_access(interaction: discord.Interaction) -> bool:
@@ -699,60 +729,133 @@ async def grant_disciple_access(interaction: discord.Interaction) -> bool:
     except Exception:
         pass
 
-    _captcha_failures.pop(user.id, None)
+    _captcha_gate.clear(user.id)
     return True
 
 
 class CaptchaModal(discord.ui.Modal, title="Vérification anti-bot"):
-    def __init__(self, a: int, b: int):
+    def __init__(self, user_id: int, captcha_id: str):
         super().__init__()
-        self._expected = a + b
+        self.user_id = user_id
+        self.captcha_id = captcha_id
         self.answer_input = discord.ui.TextInput(
-            label=f"Combien font {a} + {b} ?",
-            placeholder="Entre le résultat (nombre entier)",
+            label="Code affiché sur l’image",
+            placeholder="6 caractères",
             min_length=1,
-            max_length=4,
+            max_length=12,
             required=True,
         )
         self.add_item(self.answer_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        raw = self.answer_input.value.strip()
-        try:
-            given = int(raw)
-        except ValueError:
+        result = _captcha_gate.submit(
+            self.user_id,
+            self.captcha_id,
+            str(self.answer_input.value),
+        )
+        if result.status == "ok":
+            await interaction.response.defer(ephemeral=True)
+            await grant_disciple_access(interaction)
+            return
+        if result.status == "wrong":
             await interaction.response.send_message(
-                "❌ Réponse invalide — entre un nombre.",
+                f"❌ Incorrect. Il reste {result.left} tentative(s).",
                 ephemeral=True,
             )
             return
-
-        if given != self._expected:
-            fails = _captcha_failures.get(interaction.user.id, 0) + 1
-            _captcha_failures[interaction.user.id] = fails
-            if fails >= CAPTCHA_MAX_ATTEMPTS:
-                await interaction.response.send_message(
-                    "❌ Trop d’échecs. Réessaie dans quelques minutes ou contacte le staff.",
-                    ephemeral=True,
+        if result.status == "locked":
+            await interaction.response.send_message(
+                "❌ Trop d’échecs. Réessaie dans 2 minutes.",
+                ephemeral=True,
+            )
+            try:
+                await send_log(
+                    interaction.guild,
+                    "🤖 Captcha échoué",
+                    f"{interaction.user.mention} — {result.attempts} échecs",
+                    discord.Color.red(),
                 )
-                try:
-                    await send_log(
-                        interaction.guild,
-                        "🤖 Captcha échoué",
-                        f"{interaction.user.mention} — {fails} échecs",
-                        discord.Color.red(),
-                    )
-                except Exception:
-                    pass
-            else:
-                await interaction.response.send_message(
-                    f"❌ Incorrect. Il reste {CAPTCHA_MAX_ATTEMPTS - fails} tentative(s).",
-                    ephemeral=True,
-                )
+            except Exception:
+                pass
             return
+        if result.status == "expired":
+            await interaction.response.send_message(
+                "⏳ Ce captcha a expiré. Clique sur **Nouveau captcha**.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            "Ce captcha n’est plus valable. Clique sur **Nouveau captcha**.",
+            ephemeral=True,
+        )
 
-        await interaction.response.defer(ephemeral=True)
-        await grant_disciple_access(interaction)
+
+class CaptchaPromptView(discord.ui.View):
+    def __init__(self, user_id: int, captcha_id: str):
+        super().__init__(timeout=TTL_SECONDS)
+        self.user_id = user_id
+        self.captcha_id = captcha_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Ce captcha n’est pas pour toi.",
+            ephemeral=True,
+        )
+        return False
+
+    @discord.ui.button(label="Entrer le code", style=discord.ButtonStyle.green)
+    async def enter_code(self, interaction: discord.Interaction, button: discord.ui.Button):
+        remaining = _captcha_gate.cooldown_remaining(self.user_id)
+        if remaining > 0:
+            await interaction.response.send_message(
+                f"⏳ Trop d’échecs. Nouveau captcha dans {format_captcha_wait(remaining)}.",
+                ephemeral=True,
+            )
+            return
+        session = _captcha_gate.sessions.get(self.user_id)
+        if (
+            session is None
+            or session.captcha_id != self.captcha_id
+            or session.expires_at <= datetime.now(timezone.utc).timestamp()
+        ):
+            await interaction.response.send_message(
+                "⏳ Ce captcha a expiré. Clique sur **Nouveau captcha**.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_modal(CaptchaModal(self.user_id, self.captcha_id))
+
+    @discord.ui.button(label="Nouveau captcha", style=discord.ButtonStyle.secondary)
+    async def new_captcha(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            session = _captcha_gate.issue(self.user_id)
+        except CooldownError as exc:
+            await interaction.response.send_message(
+                f"⏳ Trop d’échecs. Nouveau captcha dans {format_captcha_wait(exc.retry_after)}.",
+                ephemeral=True,
+            )
+            return
+        view = CaptchaPromptView(self.user_id, session.captcha_id)
+        payload = {
+            "embed": captcha_embed(),
+            "view": view,
+        }
+        try:
+            await interaction.response.edit_message(
+                attachments=[captcha_file(session.code)],
+                **payload,
+            )
+        except discord.HTTPException:
+            if interaction.response.is_done():
+                raise
+            await interaction.response.send_message(
+                file=captcha_file(session.code),
+                ephemeral=True,
+                **payload,
+            )
+        self.stop()
 
 
 class AcceptRulesView(discord.ui.View):
@@ -777,14 +880,28 @@ class AcceptRulesView(discord.ui.View):
             )
             return
 
-        a, b = random.randint(2, 12), random.randint(2, 12)
-        await interaction.response.send_modal(CaptchaModal(a, b))
+        try:
+            session = _captcha_gate.issue(interaction.user.id)
+        except CooldownError as exc:
+            await interaction.response.send_message(
+                f"⏳ Trop d’échecs. Nouveau captcha dans {format_captcha_wait(exc.retry_after)}.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=captcha_embed(),
+            file=captcha_file(session.code),
+            view=CaptchaPromptView(interaction.user.id, session.captcha_id),
+            ephemeral=True,
+        )
 
 
 @bot.event
 async def on_ready():
     print(f"Zaelrys Discord Bot connecté : {bot.user}", flush=True)
     bot.add_view(AcceptRulesView())
+    print("Captcha image handler registered: accept_rules", flush=True)
     n_polls = register_live_poll_views()
     print(f"Live polls registered: {n_polls}", flush=True)
     try:
