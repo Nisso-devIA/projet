@@ -5,6 +5,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ZAEL_ROOT = Path(os.environ.get("ZAEL_ROOT", "/home/ubuntu/zaeldryk"))
@@ -12,6 +13,10 @@ DISCORD_ENV = ZAEL_ROOT / "config" / "discord.env"
 LIVE_ENV = ZAEL_ROOT / "config" / "live.env"
 STATE_FILE = ZAEL_ROOT / "state" / "last_discord_live_message.json"
 API = "https://discord.com/api/v10"
+
+
+DEDUPE_WINDOW = timedelta(minutes=10)
+LIVE_TITLE_MARK = "est en LIVE"
 
 
 def load_env(path: Path) -> dict:
@@ -27,10 +32,119 @@ def load_env(path: Path) -> dict:
     return cfg
 
 
+def parse_time(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return stamp
+
+
+def message_ids(state: dict) -> list[str]:
+    found: list[str] = []
+    for raw in state.get("message_ids") or []:
+        mid = str(raw or "").strip()
+        if mid and mid not in found:
+            found.append(mid)
+    legacy = str(state.get("message_id") or "").strip()
+    if legacy and legacy not in found:
+        found.append(legacy)
+    return found
+
+
+def load_state(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    data["message_ids"] = message_ids(data)
+    if data["message_ids"]:
+        data["message_id"] = data["message_ids"][-1]
+    return data
+
+
+def save_state(path: Path, state: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ids = message_ids(state)
+    payload = {
+        "channel_id": state.get("channel_id") or "",
+        "message_id": ids[-1] if ids else "",
+        "message_ids": ids,
+        "stream_id": state.get("stream_id") or "",
+        "started_at": state.get("started_at") or "",
+        "posted_at": state.get("posted_at") or "",
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def already_announced(state: dict, stream_id: str, started_at: str, now: datetime) -> bool:
+    """True when this live session already has an announcement."""
+    if not message_ids(state):
+        return False
+    if stream_id and state.get("stream_id") == stream_id:
+        return True
+    if started_at and state.get("started_at") == started_at:
+        return True
+    if stream_id or started_at:
+        return False
+    posted = parse_time(str(state.get("posted_at") or ""))
+    return bool(posted and now - posted < DEDUPE_WINDOW)
+
+
+def remember_message(
+    state: dict,
+    *,
+    channel_id: str,
+    message_id: str,
+    stream_id: str,
+    started_at: str,
+    posted_at: str,
+) -> dict:
+    ids = message_ids(state)
+    if message_id and message_id not in ids:
+        ids.append(message_id)
+    state["channel_id"] = channel_id
+    state["message_ids"] = ids
+    state["message_id"] = ids[-1] if ids else ""
+    if stream_id:
+        state["stream_id"] = stream_id
+    if started_at:
+        state["started_at"] = started_at
+    state["posted_at"] = posted_at
+    return state
+
+
+def is_own_live_embed(message: dict, bot_id: str) -> bool:
+    author = message.get("author") or {}
+    if str(author.get("id") or "") != str(bot_id) or not author.get("bot"):
+        return False
+    if message.get("webhook_id"):
+        return False
+    for embed in message.get("embeds") or []:
+        if LIVE_TITLE_MARK in str(embed.get("title") or ""):
+            return True
+    return False
+
+
 def main() -> None:
     title = os.environ.get("DISCORD_LIVE_TITLE", "").strip() or "Live"
     game = os.environ.get("DISCORD_LIVE_GAME", "").strip() or "Jeu non spécifié"
     login = os.environ.get("TWITCH_LOGIN", "zaeldryk")
+    stream_id = os.environ.get("DISCORD_LIVE_STREAM_ID", "").strip()
+    started_at = os.environ.get("DISCORD_LIVE_STARTED_AT", "").strip()
+    now = datetime.now(timezone.utc)
+    state = load_state(STATE_FILE)
+    if already_announced(state, stream_id, started_at, now):
+        print("skip duplicate live announcement", stream_id or started_at or "recent")
+        return
 
     cfg = {**load_env(DISCORD_ENV), **load_env(LIVE_ENV)}
     token = cfg.get("DISCORD_BOT_TOKEN")
@@ -87,15 +201,15 @@ def main() -> None:
             message_id = body.get("id")
             print("posted", message_id, "channel", channel_id)
             if message_id:
-                STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-                STATE_FILE.write_text(
-                    json.dumps(
-                        {"channel_id": channel_id, "message_id": message_id},
-                        ensure_ascii=False,
-                    )
-                    + "\n",
-                    encoding="utf-8",
+                remember_message(
+                    state,
+                    channel_id=channel_id,
+                    message_id=str(message_id),
+                    stream_id=stream_id,
+                    started_at=started_at,
+                    posted_at=now.isoformat(),
                 )
+                save_state(STATE_FILE, state)
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="replace")
         raise SystemExit(f"Discord HTTP {e.code}: {err}") from e

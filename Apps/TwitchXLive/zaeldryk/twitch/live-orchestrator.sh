@@ -47,17 +47,18 @@ maybe_discord_live_announce() {
   if [[ "${DISCORD_LIVE_ENABLED}" != "1" ]]; then
     return 0
   fi
+  local stream_id started_at
+  stream_id=$(echo "$STREAM_JSON" | jq -r '.data[0].id // ""')
+  started_at=$(echo "$STREAM_JSON" | jq -r '.data[0].started_at // ""')
   zael_log "$LOG" "Discord live announce → $STREAM_TITLE"
   DISCORD_LIVE_TITLE="$STREAM_TITLE" DISCORD_LIVE_GAME="$STREAM_GAME" \
+    DISCORD_LIVE_STREAM_ID="$stream_id" DISCORD_LIVE_STARTED_AT="$started_at" \
     /usr/bin/python3 "$DISCORD_LIVE_SCRIPT" >>"$LOG" 2>&1 || \
     zael_log "$LOG" "Discord live announce failed"
 }
 
 maybe_discord_live_delete() {
   if [[ "${DISCORD_LIVE_ENABLED}" != "1" ]]; then
-    return 0
-  fi
-  if [[ ! -f "$ZAEL_STATE/last_discord_live_message.json" ]]; then
     return 0
   fi
   zael_log "$LOG" "Discord live announce delete"
