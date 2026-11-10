@@ -671,7 +671,10 @@ CAPTCHA_TYPE_HINT = (
     "✍️ Tape le code dans la barre de message en bas de ce salon, "
     "ton message sera effacé aussitôt."
 )
+HINT_DELETE_SECONDS = 15
+NOTE_DELETE_SECONDS = 8
 _bot_deleted_message_ids: set[int] = set()
+_captcha_prompts: Dict[int, tuple[str, discord.Interaction]] = {}
 
 
 def captcha_embed() -> discord.Embed:
@@ -736,6 +739,41 @@ async def grant_disciple_access(guild: discord.Guild, user: discord.Member) -> s
     return None
 
 
+def remember_captcha_prompt(user_id: int, captcha_id: str, interaction: discord.Interaction) -> None:
+    _captcha_prompts[user_id] = (captcha_id, interaction)
+
+
+async def dismiss_captcha_prompt(user_id: int, captcha_id: str | None = None) -> None:
+    """Delete the ephemeral captcha image. Ignore an expired interaction token."""
+    saved = _captcha_prompts.get(user_id)
+    if saved is None:
+        return
+    saved_id, interaction = saved
+    if captcha_id is not None and saved_id != captcha_id:
+        return
+    _captcha_prompts.pop(user_id, None)
+    try:
+        await interaction.delete_original_response()
+    except discord.HTTPException:
+        return
+
+
+def vanish_ephemeral(interaction: discord.Interaction, delay: float) -> None:
+    async def _delete() -> None:
+        try:
+            await asyncio.sleep(delay)
+            await interaction.delete_original_response()
+        except discord.HTTPException:
+            return
+
+    asyncio.create_task(_delete())
+
+
+async def reply_ephemeral(interaction: discord.Interaction, content: str, delay: float) -> None:
+    await interaction.response.send_message(content, ephemeral=True)
+    vanish_ephemeral(interaction, delay)
+
+
 async def flash_channel(channel: discord.abc.Messageable, text: str) -> None:
     try:
         await channel.send(text, delete_after=5)
@@ -787,6 +825,7 @@ async def answer_captcha_message(message: discord.Message) -> None:
 
     result = _captcha_gate.submit(author.id, session.captcha_id, content)
     if result.status == "ok":
+        await dismiss_captcha_prompt(author.id)
         error = await grant_disciple_access(message.guild, author)
         await flash_channel(message.channel, error or "✅ Accès débloqué")
         return
@@ -797,6 +836,7 @@ async def answer_captcha_message(message: discord.Message) -> None:
         )
         return
     if result.status == "locked":
+        await dismiss_captcha_prompt(author.id)
         await flash_channel(message.channel, "❌ Trop d’échecs. Réessaie dans 2 minutes.")
         try:
             await send_log(
@@ -809,14 +849,16 @@ async def answer_captcha_message(message: discord.Message) -> None:
             pass
         return
     if result.status == "expired":
+        await dismiss_captcha_prompt(author.id)
         await flash_channel(
             message.channel,
-            "⏳ Ce captcha a expiré. Clique sur **Nouveau captcha**.",
+            "⏳ Ce captcha a expiré. Clique à nouveau sur **J'accepte le règlement**.",
         )
         return
+    await dismiss_captcha_prompt(author.id)
     await flash_channel(
         message.channel,
-        "Ce captcha n’est plus valable. Clique sur **Nouveau captcha**.",
+        "Ce captcha n’est plus valable. Clique à nouveau sur **J'accepte le règlement**.",
     )
 
 
@@ -826,23 +868,25 @@ class CaptchaPromptView(discord.ui.View):
         self.user_id = user_id
         self.captcha_id = captcha_id
 
+    async def on_timeout(self) -> None:
+        await dismiss_captcha_prompt(self.user_id, self.captcha_id)
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
             return True
-        await interaction.response.send_message(
-            "Ce captcha n’est pas pour toi.",
-            ephemeral=True,
-        )
+        await reply_ephemeral(interaction, "Ce captcha n’est pas pour toi.", NOTE_DELETE_SECONDS)
         return False
 
     @discord.ui.button(label="Entrer le code", style=discord.ButtonStyle.green)
     async def enter_code(self, interaction: discord.Interaction, button: discord.ui.Button):
         remaining = _captcha_gate.cooldown_remaining(self.user_id)
         if remaining > 0:
-            await interaction.response.send_message(
+            await reply_ephemeral(
+                interaction,
                 f"⏳ Trop d’échecs. Nouveau captcha dans {format_captcha_wait(remaining)}.",
-                ephemeral=True,
+                NOTE_DELETE_SECONDS,
             )
+            await dismiss_captcha_prompt(self.user_id, self.captcha_id)
             return
         session = _captcha_gate.sessions.get(self.user_id)
         if (
@@ -850,28 +894,33 @@ class CaptchaPromptView(discord.ui.View):
             or session.captcha_id != self.captcha_id
             or session.expires_at <= datetime.now(timezone.utc).timestamp()
         ):
-            await interaction.response.send_message(
-                "⏳ Ce captcha a expiré. Clique sur **Nouveau captcha**.",
-                ephemeral=True,
+            await reply_ephemeral(
+                interaction,
+                "⏳ Ce captcha a expiré. Clique à nouveau sur **J'accepte le règlement**.",
+                NOTE_DELETE_SECONDS,
             )
+            await dismiss_captcha_prompt(self.user_id, self.captcha_id)
             return
-        await interaction.response.send_message(CAPTCHA_TYPE_HINT, ephemeral=True)
+        await reply_ephemeral(interaction, CAPTCHA_TYPE_HINT, HINT_DELETE_SECONDS)
 
     @discord.ui.button(label="Nouveau captcha", style=discord.ButtonStyle.secondary)
     async def new_captcha(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             session = _captcha_gate.issue(self.user_id)
         except CooldownError as exc:
-            await interaction.response.send_message(
+            await reply_ephemeral(
+                interaction,
                 f"⏳ Trop d’échecs. Nouveau captcha dans {format_captcha_wait(exc.retry_after)}.",
-                ephemeral=True,
+                NOTE_DELETE_SECONDS,
             )
+            await dismiss_captcha_prompt(self.user_id, self.captcha_id)
             return
         view = CaptchaPromptView(self.user_id, session.captcha_id)
         payload = {
             "embed": captcha_embed(),
             "view": view,
         }
+        previous = _captcha_prompts.get(self.user_id)
         try:
             await interaction.response.edit_message(
                 attachments=[captcha_file(session.code)],
@@ -879,12 +928,22 @@ class CaptchaPromptView(discord.ui.View):
             )
         except discord.HTTPException:
             if interaction.response.is_done():
-                raise
+                self.stop()
+                return
             await interaction.response.send_message(
                 file=captcha_file(session.code),
                 ephemeral=True,
                 **payload,
             )
+            remember_captcha_prompt(self.user_id, session.captcha_id, interaction)
+            if previous is not None:
+                try:
+                    await previous[1].delete_original_response()
+                except discord.HTTPException:
+                    pass
+            self.stop()
+            return
+        remember_captcha_prompt(self.user_id, session.captcha_id, interaction)
         self.stop()
 
 
@@ -899,32 +958,36 @@ class AcceptRulesView(discord.ui.View):
     )
     async def accept_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Erreur membre.", ephemeral=True)
+            await reply_ephemeral(interaction, "Erreur membre.", NOTE_DELETE_SECONDS)
             return
 
         role = discord.utils.get(interaction.guild.roles, name=ROLE_DISCIPLE)
         if role and role in interaction.user.roles:
-            await interaction.response.send_message(
+            await reply_ephemeral(
+                interaction,
                 "Tu as déjà accepté le règlement.",
-                ephemeral=True,
+                NOTE_DELETE_SECONDS,
             )
             return
 
         try:
             session = _captcha_gate.issue(interaction.user.id)
         except CooldownError as exc:
-            await interaction.response.send_message(
+            await reply_ephemeral(
+                interaction,
                 f"⏳ Trop d’échecs. Nouveau captcha dans {format_captcha_wait(exc.retry_after)}.",
-                ephemeral=True,
+                NOTE_DELETE_SECONDS,
             )
             return
 
+        await dismiss_captcha_prompt(interaction.user.id)
         await interaction.response.send_message(
             embed=captcha_embed(),
             file=captcha_file(session.code),
             view=CaptchaPromptView(interaction.user.id, session.captcha_id),
             ephemeral=True,
         )
+        remember_captcha_prompt(interaction.user.id, session.captcha_id, interaction)
 
 
 @bot.event
@@ -932,6 +995,7 @@ async def on_ready():
     print(f"Zaelrys Discord Bot connecté : {bot.user}", flush=True)
     bot.add_view(AcceptRulesView())
     print("Captcha image handler registered: accept_rules + reglement messages", flush=True)
+    print("Captcha ephemeral cleanup registered", flush=True)
     print(f"message_content intent: {bot.intents.message_content}", flush=True)
     n_polls = register_live_poll_views()
     print(f"Live polls registered: {n_polls}", flush=True)
