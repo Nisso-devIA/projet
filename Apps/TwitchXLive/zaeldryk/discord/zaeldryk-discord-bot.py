@@ -16,6 +16,11 @@ from discord.ext import commands
 from captcha_image import TTL_SECONDS, CaptchaGate, CooldownError, render_captcha_png
 from rules_message import BANNER_FILENAME, BANNER_PATH, rules_embed_dict
 from levels import handle_text_xp, register_level_commands, start_level_system
+from unverified import (
+    record_unverified_departure,
+    register_unverified_commands,
+    start_unverified_watch,
+)
 from temp_voice import cleanup_empty_temp_channels, register_temp_voice
 
 CONFIG_PATH = Path("/home/ubuntu/zaeldryk/config/discord.env")
@@ -1036,6 +1041,10 @@ async def on_ready():
         await start_level_system(bot)
     except Exception as exc:
         print(f"Level system startup error: {exc}", flush=True)
+    try:
+        await start_unverified_watch(bot)
+    except Exception as exc:
+        print(f"Unverified watch startup error: {exc}", flush=True)
     n_polls = register_live_poll_views()
     print(f"Live polls registered: {n_polls}", flush=True)
     try:
@@ -1250,6 +1259,10 @@ async def on_member_join(member):
 
 @bot.event
 async def on_member_remove(member):
+    try:
+        await record_unverified_departure(member)
+    except Exception as exc:
+        print(f"Unverified departure error: {exc}", flush=True)
     ch = discord.utils.get(member.guild.text_channels, name="🚪-départs")
     if ch:
         embed = discord.Embed(
@@ -1407,4 +1420,5 @@ except Exception as exc:
 
 register_temp_voice(bot)
 register_level_commands(bot)
+register_unverified_commands(bot)
 bot.run(BOT_TOKEN)
