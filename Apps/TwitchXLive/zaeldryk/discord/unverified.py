@@ -337,6 +337,8 @@ def _pending_lines(guild: discord.Guild) -> tuple[list[str], list[discord.Member
     for member in guild.members:
         if member.bot or has_disciple(member) or member.joined_at is None:
             continue
+        if member.id == guild.owner_id:
+            continue
         start = clock_start(member.joined_at, deployed)
         rows.append((kick_at(start), member, start))
     rows.sort(key=lambda item: item[0])
