@@ -25,10 +25,7 @@ function phoneFromJid(jid) {
 
 function getExcludedStoryPhones() {
   const la = config.liveAnnounce || {};
-  return new Set([
-    ...(config.stealthChats || []),
-    ...(la.statusExcludeList || []),
-  ]);
+  return new Set([...(la.statusExcludeList || [])]);
 }
 
 function applyStoryExclusions(jids) {

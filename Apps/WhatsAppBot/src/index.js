@@ -4,7 +4,6 @@ import makeWASocket, {
   downloadMediaMessage,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
-  WAMessageStatus,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import { existsSync, unlinkSync } from "node:fs";
@@ -24,10 +23,6 @@ import { startLiveWatcher, stopLiveWatcher } from "./live-watcher.js";
 import { nextDelayMs, REPLACED_CODE, shouldStopReplaced } from "./reconnect.js";
 import { runPendingStatusRetry } from "./status-post.js";
 import { recordStatusView } from "./status-views.js";
-import {
-  notifyOwnerOutgoingRead,
-  shouldMarkIncomingAsRead,
-} from "./read-receipts.js";
 import {
   buildQuotedDownloadMessage,
   getAudioMessage,
@@ -215,21 +210,6 @@ async function openSocket() {
     }
   });
 
-  sock.ev.on("messages.update", async (updates) => {
-    if (id !== sessionId) return;
-    for (const { key, update } of updates) {
-      if (!key?.fromMe || !key.remoteJid) continue;
-      if (update.status !== WAMessageStatus.READ && update.status !== WAMessageStatus.PLAYED) {
-        continue;
-      }
-      try {
-        await notifyOwnerOutgoingRead(sock, key.remoteJid, key);
-      } catch (err) {
-        console.error("Erreur lecture sortante :", err.message);
-      }
-    }
-  });
-
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (id !== sessionId) return;
     if (type !== "notify" && type !== "append") return;
@@ -260,7 +240,7 @@ function alreadySeen(id) {
 async function transcribeVoice(sock, sourceMsg, jid, audio, { quotedMsg = null } = {}) {
   const pushName = sourceMsg.pushName || "";
   console.log(`[${pushName || jid}] (vocal ${audio.seconds || "?"}s)`);
-  if (shouldMarkIncomingAsRead(jid)) {
+  if (config.markAsRead) {
     await sock.readMessages([sourceMsg.key]).catch(() => {});
   }
   await sock.sendPresenceUpdate("composing", jid).catch(() => {});
@@ -356,7 +336,7 @@ async function onMessage(sock, msg, type = "notify") {
   const pushName = msg.pushName || "";
   console.log(`[${fromMe ? "moi" : pushName || jid}] ${text}`);
 
-  if (!fromMe && shouldMarkIncomingAsRead(jid)) {
+  if (!fromMe && config.markAsRead) {
     await sock.readMessages([msg.key]);
   }
 
