@@ -25,6 +25,9 @@ BUILTINS = {
     "commandes",
     "commands",
     "relais",
+    "regles",
+    "addhate",
+    "delhate",
 }
 
 

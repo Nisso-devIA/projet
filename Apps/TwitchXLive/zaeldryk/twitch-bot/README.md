@@ -8,7 +8,12 @@ Bot de chat pour [twitch.tv/zaeldryk](https://twitch.tv/zaeldryk). Il remplace W
 - Les commandes `!discord`, `!tiktok`, `!planning`, `!commandes` sont dans `commands.example.json`. Les mods peuvent en ajouter avec `!addcmd`, `!editcmd` et `!delcmd`.
 - Chaque commande a un cooldown et un niveau : `everyone`, `sub`, `vip`, `mod` ou `broadcaster`. Un mod peut utiliser les commandes d’un palier plus bas.
 - Les messages automatiques partent seulement si le chat a envoyé assez de messages depuis le dernier envoi. Le réglage est dans `timers.example.json`.
-- La modération retire les liens (sauf `!permit pseudo`, un lien pendant 60 secondes), le spam, les répétitions, l’excès de majuscules et les mots listés dans `moderation.example.json`. Les timeouts montent : 60 s, 5 min, 10 min, 30 min, 1 h. Les VIP, mods et le broadcaster ne sont pas touchés.
+- La modération retire les liens (sauf `!permit pseudo`, un lien pendant 60 secondes), le spam, les répétitions et l’excès de majuscules. Les timeouts de ces règles montent : 60 s, 5 min, 10 min, 30 min, 1 h. Les VIP, mods et le broadcaster ne sont pas touchés par ces règles-là.
+- Les propos haineux (liste dans `moderation.example.json`, extensible avec `!addhate` et `!delhate`) suppriment le message et bannissent tout de suite. Seuls le broadcaster et les mods y échappent : un VIP n’y échappe pas.
+- Le spam de vente de viewers, followers ou primes, et les raccourcis suspects, suppriment le message et bannissent.
+- La pub vers une autre chaîne ou un autre Discord supprime le message et prévient en public. Les liens de Zaeldryk (Twitch, TikTok, YouTube, Kick, Discord `3vH2u7pme5`) passent. `!permit` autorise un lien.
+- Les insultes suivent trois paliers, mémorisés 30 jours dans `data/vulgar-strikes.json` : avertissement, timeout de 5 minutes, puis ban. Le journal `logs/moderation.log` note qui, quelle règle et quelle action, sans recopier le mot.
+- Deux minutes après le début de chaque live, le bot envoie une fois le texte de `regles.example.txt`. `!regles` renvoie le même texte. L’identifiant du live est retenu dans `data/greeting.json` : un redémarrage pendant ce live ne renvoie pas le message. Le délai est `delay_seconds` dans `greeting.example.json`.
 - EventSub envoie un message pour les follows, les abonnements, les réabonnements, les gifts, les raids et les bits. Un raid lance aussi un `/shoutout`.
 - `!uptime`, `!followage`, `!so pseudo`, `!titre` et `!jeu`. Sans argument, `!titre` et `!jeu` affichent la valeur actuelle. Avec un argument, un mod peut la changer.
 - `!relais on` et `!relais off` coupent ou ouvrent le relais du chat TikTok Live de `@zaeldryk`. Le format est `🎵 pseudo : message`. Si TikTok bloque la connexion, le bot Twitch continue.

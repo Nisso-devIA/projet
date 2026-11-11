@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import logging
 import os
@@ -16,10 +17,11 @@ from twitchio.ext import commands
 from zaelbot.auth import refresh_token
 from zaelbot.commands import CooldownBook, CommandBook, manage_command, parse_command, render_response, save_commands
 from zaelbot.events import event_from_notification, render_event, tiktok_line
+from zaelbot.greeting import DEFAULT_DELAY_SECONDS, DEFAULT_RULES_TEXT, LiveGreeting
 from zaelbot.helix_text import followage_text, shoutout_text, uptime_text
-from zaelbot.moderation import ModerationConfig, ModerationState
-from zaelbot.permissions import allows, is_exempt, permission_level
-from zaelbot.store import ensure_copy, read_json
+from zaelbot.moderation import ModerationConfig, ModerationState, hate_command, sanction_line
+from zaelbot.permissions import allows, permission_level
+from zaelbot.store import atomic_write, ensure_copy, read_json
 from zaelbot.tiktok_filter import TikTokFilter
 from zaelbot.timers import Timer, TimerScheduler
 
@@ -56,7 +58,31 @@ def _load_book() -> CommandBook:
 def _load_moderation() -> ModerationState:
     ensure_copy(ROOT / "moderation.example.json", DATA / "moderation.json")
     raw = read_json(DATA / "moderation.json", {})
-    return ModerationState(ModerationConfig.from_dict(raw if isinstance(raw, dict) else {}))
+    strikes = read_json(DATA / "vulgar-strikes.json", {})
+    return ModerationState(
+        ModerationConfig.from_dict(raw if isinstance(raw, dict) else {}),
+        strikes if isinstance(strikes, dict) else {},
+    )
+
+
+def _load_greeting() -> LiveGreeting:
+    ensure_copy(ROOT / "regles.example.txt", DATA / "regles.txt")
+    text = (DATA / "regles.txt").read_text(encoding="utf-8").strip() or DEFAULT_RULES_TEXT
+    ensure_copy(ROOT / "greeting.example.json", DATA / "greeting.json")
+    raw = read_json(DATA / "greeting.json", {})
+    delay = DEFAULT_DELAY_SECONDS
+    sent = []
+    if isinstance(raw, dict):
+        delay = int(raw.get("delay_seconds") or DEFAULT_DELAY_SECONDS)
+        sent = list(raw.get("sent_stream_ids") or [])
+    return LiveGreeting(text, delay, sent)
+
+
+def _save_greeting(greeting: LiveGreeting) -> None:
+    atomic_write(
+        DATA / "greeting.json",
+        {"delay_seconds": greeting.delay_seconds, "sent_stream_ids": sorted(greeting.sent)},
+    )
 
 
 def _load_timers() -> TimerScheduler:
@@ -156,6 +182,25 @@ class Helix:
             query={"broadcaster_id": BROADCASTER_ID, "moderator_id": BOT_USER_ID},
         )
 
+    def ban(self, user_id: str, reason: str) -> None:
+        self._request(
+            "POST",
+            "/moderation/bans",
+            body={"data": {"user_id": user_id, "reason": reason[:200]}},
+            query={"broadcaster_id": BROADCASTER_ID, "moderator_id": BOT_USER_ID},
+        )
+
+    def delete_message(self, message_id: str) -> None:
+        self._request(
+            "DELETE",
+            "/moderation/chat",
+            query={
+                "broadcaster_id": BROADCASTER_ID,
+                "moderator_id": BOT_USER_ID,
+                "message_id": message_id,
+            },
+        )
+
     def shoutout(self, to_broadcaster_id: str) -> None:
         self._request(
             "POST",
@@ -190,12 +235,14 @@ class ZaelBot(commands.Bot):
         self.templates = _load_templates()
         self.cooldowns = CooldownBook()
         self.relay_enabled = os.environ.get("TIKTOK_RELAY", "0") == "1"
+        self.greeting = _load_greeting()
         self.tiktok_filter = TikTokFilter()
         self.helix = Helix(os.environ["TWITCH_CLIENT_ID"], token)
         self._token = token
 
     async def event_ready(self) -> None:
         log.info("Connecté au chat de #%s", CHANNEL_LOGIN)
+        asyncio.create_task(self._greet_current_live())
         asyncio.create_task(self._timers_loop())
         asyncio.create_task(self._eventsub_loop())
         asyncio.create_task(self._tiktok_loop())
@@ -212,10 +259,15 @@ class ZaelBot(commands.Bot):
             is_vip=author.is_vip,
         )
         text = message.content or ""
-        action = self.moderation.inspect(author.name, text, _now(), exempt=is_exempt(level))
-        if action is not None and author.id:
-            log.info("Modération %s : %s (%ss)", author.name, action.reason, action.duration)
-            await asyncio.to_thread(self.helix.timeout, author.id, action.duration, action.reason)
+        action = self.moderation.inspect(
+            author.name,
+            text,
+            _wall_now(),
+            level=level,
+            first_message=bool(getattr(message, "first", False)),
+        )
+        if action is not None:
+            await self._apply_sanction(message, action)
             return
         parsed = parse_command(text)
         if parsed is None:
@@ -229,6 +281,16 @@ class ZaelBot(commands.Bot):
 
     async def _dispatch(self, name: str, args: str, author, level: str) -> str | None:
         now = _now()
+        if name == "regles":
+            if not self.cooldowns.ready(name, author.name, now, 10, 30):
+                return None
+            self.cooldowns.mark(name, author.name, now, 10, 30)
+            return self.greeting.text
+        if name in {"addhate", "delhate"}:
+            reply = hate_command(self.moderation, name, args, level)
+            if reply.startswith("Terme "):
+                atomic_write(DATA / "moderation.json", _config_dict(self.moderation.config))
+            return reply
         if name in {"addcmd", "editcmd", "delcmd"}:
             reply = manage_command(self.book, name, args, level)
             if reply.startswith("Commande "):
@@ -251,7 +313,7 @@ class ZaelBot(commands.Bot):
             self.relay_enabled = choice == "on"
             return "Relais TikTok activé." if self.relay_enabled else "Relais TikTok coupé."
         if name in {"commandes", "commands"}:
-            names = ["uptime", "followage", "so", "titre", "jeu", "permit", "relais"] + self.book.visible_names()
+            names = ["uptime", "followage", "so", "titre", "jeu", "permit", "relais", "regles"] + self.book.visible_names()
             return "Commandes : " + ", ".join(f"!{item}" for item in names)
         if name in {"uptime", "followage", "so", "shoutout", "titre", "title", "jeu", "game"}:
             if not self.cooldowns.ready(name, author.name, now, 10, 15):
@@ -359,7 +421,10 @@ class ZaelBot(commands.Bot):
                                 url = payload["session"]["reconnect_url"]
                                 break
                             elif kind == "notification":
-                                await self._on_notification(payload)
+                                if payload.get("subscription", {}).get("type") == "stream.online":
+                                    await self._on_stream_online(payload.get("event") or {})
+                                else:
+                                    await self._on_notification(payload)
             except Exception as exc:
                 log.warning("EventSub interrompu : %s", type(exc).__name__)
                 await asyncio.sleep(10)
@@ -373,6 +438,7 @@ class ZaelBot(commands.Bot):
             ("channel.subscription.gift", "1", {"broadcaster_user_id": BROADCASTER_ID}),
             ("channel.cheer", "1", {"broadcaster_user_id": BROADCASTER_ID}),
             ("channel.raid", "1", {"to_broadcaster_user_id": BROADCASTER_ID}),
+            ("stream.online", "1", {"broadcaster_user_id": BROADCASTER_ID}),
         ]
         for event_type, version, condition in specs:
             status = self.helix.subscribe_event(session_id, event_type, version, condition)
@@ -434,6 +500,80 @@ class ZaelBot(commands.Bot):
         channel = self.get_channel(CHANNEL_LOGIN)
         if channel is not None and self.relay_enabled:
             await channel.send(line[:450])
+
+    async def _apply_sanction(self, message, action) -> None:
+        author = message.author
+        _log_sanction(author.name, action.reason, action.action)
+        if action.reason == "vulgarite":
+            atomic_write(DATA / "vulgar-strikes.json", self.moderation.export_strikes())
+        if getattr(message, "id", None):
+            await asyncio.to_thread(self.helix.delete_message, message.id)
+        if action.warning:
+            await message.channel.send(action.warning[:450])
+        if not author.id:
+            return
+        if action.action == "ban":
+            await asyncio.to_thread(self.helix.ban, author.id, action.reason)
+        elif action.action == "timeout" and action.duration:
+            await asyncio.to_thread(self.helix.timeout, author.id, action.duration, action.reason)
+
+    async def _greet_current_live(self) -> None:
+        started = await asyncio.to_thread(self.helix.stream_started_at)
+        if started:
+            await self._schedule_greeting(started, started)
+
+    async def _on_stream_online(self, event: dict) -> None:
+        started = str(event.get("started_at") or "")
+        if started:
+            await self._schedule_greeting(started, started)
+
+    async def _schedule_greeting(self, stream_id: str, started_at: str) -> None:
+        if not self.greeting.claim(stream_id):
+            return
+        try:
+            started = datetime.datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        except ValueError:
+            self.greeting.cancel(stream_id)
+            return
+        wait = self.greeting.wait_seconds(started, datetime.datetime.now(datetime.timezone.utc))
+        await asyncio.sleep(wait)
+        channel = None
+        for _ in range(6):
+            channel = self.get_channel(CHANNEL_LOGIN)
+            if channel is not None:
+                break
+            await asyncio.sleep(5)
+        if channel is None:
+            self.greeting.cancel(stream_id)
+            return
+        try:
+            await channel.send(self.greeting.text[:450])
+        except Exception as exc:
+            self.greeting.cancel(stream_id)
+            log.warning("Message de règles non envoyé : %s", type(exc).__name__)
+            return
+        self.greeting.mark_sent(stream_id)
+        _save_greeting(self.greeting)
+        log.info("Message de règles envoyé pour le live %s", stream_id)
+
+
+def _log_sanction(user: str, rule: str, action: str) -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    with (LOG_DIR / "moderation.log").open("a", encoding="utf-8") as handle:
+        handle.write(sanction_line(user, rule, action, stamp))
+
+
+def _config_dict(config) -> dict:
+    from dataclasses import asdict
+
+    return asdict(config)
+
+
+def _wall_now() -> float:
+    import time
+
+    return time.time()
 
 
 def _now() -> float:
