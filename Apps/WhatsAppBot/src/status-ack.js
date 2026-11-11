@@ -36,9 +36,9 @@ export function watchServerAck(emitter, messageId, timeoutMs = 20_000) {
 export function createStatusRetry() {
   let pending = null;
   return {
-    schedule(kind, title) {
+    schedule(kind, title, messageId) {
       if (!pending) {
-        pending = { kind, title, used: false, exhausted: false };
+        pending = { kind, title, messageId, used: false, exhausted: false };
         return "scheduled";
       }
       if (pending.used && !pending.exhausted) {
@@ -50,7 +50,9 @@ export function createStatusRetry() {
     take() {
       if (!pending || pending.used || pending.exhausted) return null;
       pending = { ...pending, used: true };
-      return { kind: pending.kind, title: pending.title };
+      const job = { kind: pending.kind, title: pending.title };
+      if (pending.messageId) job.messageId = pending.messageId;
+      return job;
     },
     clear() {
       pending = null;

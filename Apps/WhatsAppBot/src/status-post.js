@@ -1,8 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { generateMessageIDV2 } from "@whiskeysockets/baileys";
 import { config, ROOT_DIR } from "./config.js";
 import { getCachedContactCount, getStatusAudienceJids } from "./contact-cache.js";
 import { createStatusRetry, isServerAck, watchServerAck } from "./status-ack.js";
+import {
+  ensureStatusSessions,
+  refreshStatusDevices,
+  statusRecipients,
+  deliverStatus,
+} from "./status-send.js";
 import { rememberStory } from "./status-views.js";
 
 const retries = createStatusRetry();
@@ -32,26 +39,16 @@ function applyStoryExclusions(jids) {
 function buildStatusJidList(sock) {
   const la = config.liveAnnounce || {};
   const audience = la.statusAudience || "all";
-  let jids;
-
+  const raw = [];
   if (audience === "custom") {
-    const phones = new Set(la.statusJidList || []);
-    if (config.ownerNumber) phones.add(config.ownerNumber);
-    jids = [...phones].map((p) => `${p}@s.whatsapp.net`);
-    if (sock.user?.id) jids.unshift(sock.user.id);
-    jids = [...new Set(jids)];
+    raw.push(...(la.statusJidList || []).map((phone) => `${phone}@s.whatsapp.net`));
   } else {
-    jids = new Set(getStatusAudienceJids(sock));
-    for (const phone of la.statusJidList || []) {
-      jids.add(`${phone}@s.whatsapp.net`);
-    }
-    if (config.ownerNumber) {
-      jids.add(`${config.ownerNumber}@s.whatsapp.net`);
-    }
-    jids = [...jids];
+    raw.push(...getStatusAudienceJids(sock));
+    for (const phone of la.statusJidList || []) raw.push(`${phone}@s.whatsapp.net`);
   }
-
-  return applyStoryExclusions(jids);
+  if (config.ownerNumber) raw.push(`${config.ownerNumber}@s.whatsapp.net`);
+  if (sock.user?.id) raw.push(sock.user.id);
+  return statusRecipients(applyStoryExclusions(raw), sock.user?.id);
 }
 
 function readLastPosted() {
@@ -97,12 +94,13 @@ function assertStoryRateLimit() {
   }
 }
 
-export async function postTextStatus(sock, text, { backgroundColor, font } = {}) {
+export async function postTextStatus(sock, text, options = {}) {
+  const { backgroundColor, font } = options;
   const la = config.liveAnnounce || {};
   if (!la.enabled) {
     throw new Error("Stories désactivées dans la config");
   }
-  assertStoryRateLimit();
+  if (options.countSlot !== false) assertStoryRateLimit();
   const statusJidList = buildStatusJidList(sock);
 
   if (statusJidList.length < 1) {
@@ -111,40 +109,59 @@ export async function postTextStatus(sock, text, { backgroundColor, font } = {})
     );
   }
 
-  const result = await sock.sendMessage(
-    "status@broadcast",
-    {
-      text,
-      contextInfo: {
-        featureEligibilities: { canBeReshared: true },
-      },
+  const messageId = options.messageId || generateMessageIDV2(sock.user?.id);
+  const maxAttempts = options.maxAttempts || (options.messageId ? 1 : 2);
+  const content = {
+    text,
+    contextInfo: {
+      featureEligibilities: { canBeReshared: true },
     },
-    {
-      broadcast: true,
-      statusJidList,
-      backgroundColor: backgroundColor || la.liveBackgroundColor || "#9146FF",
-      font: font ?? la.statusFont ?? 2,
-    }
-  );
-  recordStoryPost();
-
-  let delivery = result?.status ?? null;
-  if (!isServerAck(delivery) && result?.key?.id) {
-    const waited = await watchServerAck(sock.ev, result.key.id, ACK_TIMEOUT_MS);
-    if (waited.acked) delivery = waited.status;
-  }
-  const acked = isServerAck(delivery);
+  };
+  const sendOptions = {
+    broadcast: true,
+    statusJidList,
+    backgroundColor: backgroundColor || la.liveBackgroundColor || "#9146FF",
+    font: font ?? la.statusFont ?? 2,
+    messageId,
+  };
+  const refresh = async () => {
+    const fetched = await refreshStatusDevices(sock.getUSyncDevices?.bind(sock), statusJidList);
+    const sessions = await ensureStatusSessions(sock.assertSessions?.bind(sock), fetched.deviceJids);
+    console.log(
+      `Story préparation : ${statusJidList.length} destinataires, ${fetched.chunks} lots, ${fetched.devices} appareils, ${fetched.failedChunks} lots en échec, sessions ${sessions.failedChunks} échecs`
+    );
+    return fetched;
+  };
+  if (options.countSlot !== false) recordStoryPost();
+  const delivered = await deliverStatus({
+    createId: () => messageId,
+    maxAttempts,
+    refresh,
+    waitAck: (id) => watchServerAck(sock.ev, id, ACK_TIMEOUT_MS),
+    send: async (id) => {
+      const result = await sock.sendMessage("status@broadcast", content, { ...sendOptions, messageId: id });
+      return { status: result?.status ?? null, result };
+    },
+  });
+  const delivery = delivered.status;
+  const acked = delivered.acked && isServerAck(delivery);
   console.log(
-    `Story ${acked ? "confirmée" : "non confirmée"} (${statusJidList.length} contacts, ${getExcludedStoryPhones().size} exclus, statut=${delivery ?? "?"}, cache=${getCachedContactCount()})`
+    `Story ${acked ? "confirmée" : "non confirmée"} id=${delivered.id} essais=${delivered.attempts} (${statusJidList.length} contacts, ${getExcludedStoryPhones().size} exclus, statut=${delivery ?? "?"}, cache=${getCachedContactCount()})`
   );
   if (!acked) {
-    console.warn("Story sans accusé serveur (pending). Un seul nouvel essai si la connexion revient.");
+    console.warn(`Story ${delivered.id} sans accusé serveur après ${delivered.attempts} essai(s) du même id.`);
   }
 
-  return { result, statusJidList, delivery, acked, contactCount: getCachedContactCount() };
+  return {
+    result: { key: { id: delivered.id }, status: delivery },
+    statusJidList,
+    delivery,
+    acked,
+    contactCount: getCachedContactCount(),
+  };
 }
 
-export async function postLiveStory(sock, title = "") {
+export async function postLiveStory(sock, title = "", options = {}) {
   const la = config.liveAnnounce || {};
   const url = la.twitchUrl || "https://twitch.tv/zaeldryk";
   const base = la.liveStatusText || "🔴 Zaeldryk est EN LIVE !";
@@ -153,9 +170,12 @@ export async function postLiveStory(sock, title = "") {
   const info = await postTextStatus(sock, text, {
     backgroundColor: la.liveBackgroundColor || "#9146FF",
     font: la.statusFont ?? 2,
+    countSlot: options.countSlot,
+    messageId: options.messageId,
+    maxAttempts: options.maxAttempts,
   });
   if (!info.acked) {
-    scheduleStatusRetry("live", title);
+    scheduleStatusRetry("live", title, info.result?.key?.id);
     return info;
   }
   rememberStory({
@@ -168,7 +188,7 @@ export async function postLiveStory(sock, title = "") {
   return info;
 }
 
-export async function postEndStory(sock) {
+export async function postEndStory(sock, options = {}) {
   const la = config.liveAnnounce || {};
   const text =
     la.endStatusText || "✅ Live terminé — merci d'avoir regardé ! À bientôt 👋";
@@ -176,9 +196,12 @@ export async function postEndStory(sock) {
   const info = await postTextStatus(sock, text, {
     backgroundColor: la.endBackgroundColor || "#1a1a2e",
     font: la.statusFont ?? 2,
+    countSlot: options.countSlot,
+    messageId: options.messageId,
+    maxAttempts: options.maxAttempts,
   });
   if (!info.acked) {
-    scheduleStatusRetry("end", "");
+    scheduleStatusRetry("end", "", info.result?.key?.id);
     return info;
   }
   rememberStory({
@@ -210,8 +233,8 @@ export function getLastPostedKind() {
   return readLastPosted()?.kind || null;
 }
 
-export function scheduleStatusRetry(kind, title) {
-  const result = retries.schedule(kind, title);
+export function scheduleStatusRetry(kind, title, messageId) {
+  const result = retries.schedule(kind, title, messageId);
   if (result === "exhausted") {
     console.log(`Story ${kind} non confirmée après le second essai. Aucun autre envoi.`);
   }
@@ -221,13 +244,14 @@ export function scheduleStatusRetry(kind, title) {
 export async function runPendingStatusRetry(sock) {
   const job = retries.take();
   if (!job || !sock) return null;
-  console.log(`Second essai unique de la story ${job.kind}`);
+  console.log(`Reprise de la story ${job.kind} avec le même id`);
+  const retryOptions = { countSlot: false, messageId: job.messageId, maxAttempts: 1 };
   try {
-    if (job.kind === "end") return await postEndStory(sock);
-    return await postLiveStory(sock, job.title || "");
+    if (job.kind === "end") return await postEndStory(sock, retryOptions);
+    return await postLiveStory(sock, job.title || "", retryOptions);
   } catch (err) {
-    scheduleStatusRetry(job.kind, job.title || "");
-    console.error(`Second essai story ${job.kind} échoué : ${err.message}`);
+    scheduleStatusRetry(job.kind, job.title || "", job.messageId);
+    console.error(`Reprise story ${job.kind} échouée : ${err.message}`);
     return null;
   }
 }

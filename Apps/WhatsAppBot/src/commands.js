@@ -96,7 +96,7 @@ const commands = {
           "⚠️ Peu de contacts synchronisés — laisse le bot connecté quelques minutes puis réessaie."
         );
       }
-      if (info.delivery === "PENDING" || info.delivery === 0) {
+      if (typeof info.delivery === "number" ? info.delivery < 2 : info.delivery === "PENDING") {
         lines.push(
           "⚠️ Bug connu Baileys : la story peut rester invisible même si le bot dit OK."
         );
