@@ -19,7 +19,7 @@ Bot de chat pour [twitch.tv/zaeldryk](https://twitch.tv/zaeldryk). Il remplace W
 - `!mort` ajoute une mort (VIP, mods, broadcaster, cooldown 10 secondes). `!morts` affiche le total du jeu en cours. Les mods ont `!mort -1` et `!mortreset`. Les totaux sont dans `data/deaths.json`, un compteur par jeu.
 - `!pari "Question ?" Oui | Non 120` et `!sondage "Question ?" A | B 60` utilisent l’API Twitch (mods et broadcaster). `!pari fin 1` désigne le gagnant, `!pari annule` et `!sondage annule` ferment. Si la chaîne n’est pas affiliée ou si le jeton est refusé, le vote continue dans le chat : les viewers tapent le numéro.
 - Le premier message d’un viewer est salué avec le lien Discord, une seule fois, mémorisé dans `data/seen-chatters.json`. Les bots et le broadcaster ne le sont pas. Un écart (`FIRST_WELCOME_GAP_SECONDS`) empêche un raid de noyer le chat.
-- À `stream.offline`, un récap part sur Discord (durée, follows, abonnements, cadeaux, raids, morts du live par jeu, chatter les plus actifs, clip le plus vu). Le webhook vise par défaut 📢-annonces (`1541249724902809692`), sans @everyone. Ce n’est pas une annonce de début de live.
+- À `stream.offline`, un récap part sur Discord (durée, follows, abonnements, cadeaux, raids, morts du live par jeu, chatter les plus actifs, clip le plus vu). Le salon par défaut est 📝-résumé (`1570024936565899357`), sans @everyone. Ce n’est pas une annonce de début de live.
 - EventSub envoie un message pour les follows, les abonnements, les réabonnements, les gifts, les raids et les bits. Un raid lance aussi un `/shoutout`.
 - `!uptime`, `!followage`, `!so pseudo`, `!titre` et `!jeu`. Sans argument, `!titre` et `!jeu` affichent la valeur actuelle. Avec un argument, un mod peut la changer.
 - `!relais on` et `!relais off` coupent ou ouvrent le relais du chat TikTok Live de `@zaeldryk`. Le format est `🎵 pseudo : message`. Si TikTok bloque la connexion, le bot Twitch continue.
@@ -65,7 +65,7 @@ python3 scripts/get_token.py --flow code --who broadcaster
 
 Ouvre le lien en étant connecté à zaeldryk. Les scopes demandés sont `clips:edit`, `channel:manage:predictions` et `channel:manage:polls`. Le script écrit `TWITCH_BROADCASTER_ACCESS_TOKEN` et `TWITCH_BROADCASTER_REFRESH_TOKEN` sans les afficher.
 
-Crée ensuite deux webhooks Discord, un dans 🎬-clips et un dans 📢-annonces. Colle les URL dans `DISCORD_CLIPS_WEBHOOK_URL` et `DISCORD_RECAP_WEBHOOK_URL`. Ne pointe pas le webhook clips vers 𝕋-twitch. Les paris et sondages natifs demandent une chaîne affiliée ; sinon le bot bascule sur un vote dans le chat.
+Crée ensuite deux webhooks Discord, un dans 🎬-clips et un dans 📝-résumé (`1570024936565899357`). Colle les URL dans `DISCORD_CLIPS_WEBHOOK_URL` et `DISCORD_RECAP_WEBHOOK_URL`. Ne pointe pas le webhook clips vers 𝕋-twitch, ni le récap vers 📢-annonces. Les paris et sondages natifs demandent une chaîne affiliée ; sinon le bot bascule sur un vote dans le chat.
 
 Si le flux par code est refusé, utilise :
 

@@ -9,7 +9,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from zaelbot.auth import BROADCASTER_SCOPES
 from zaelbot.deaths import DeathCounter
-from zaelbot.recap import LiveStats, build_recap, clip_url, discord_payload, duration_text, pick_top_clip, post_webhook
+from zaelbot.recap import (
+    DEFAULT_RECAP_CHANNEL_ID,
+    LiveStats,
+    build_recap,
+    clip_url,
+    discord_payload,
+    duration_text,
+    pick_top_clip,
+    post_webhook,
+)
 from zaelbot.votes import VoteBook, api_available, parse_vote_args, poll_body, prediction_body, prediction_end_body
 from zaelbot.welcome import FirstWelcome
 
@@ -130,6 +139,7 @@ class RecapTests(unittest.TestCase):
         self.assertIn("clips:edit", BROADCASTER_SCOPES)
         self.assertIn("channel:manage:predictions", BROADCASTER_SCOPES)
         self.assertIn("channel:manage:polls", BROADCASTER_SCOPES)
+        self.assertEqual(DEFAULT_RECAP_CHANNEL_ID, "1570024936565899357")
 
 
 if __name__ == "__main__":

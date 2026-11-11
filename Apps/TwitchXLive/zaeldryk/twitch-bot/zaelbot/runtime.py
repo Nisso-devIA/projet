@@ -22,7 +22,7 @@ from zaelbot.greeting import DEFAULT_DELAY_SECONDS, DEFAULT_RULES_TEXT, LiveGree
 from zaelbot.helix_text import followage_text, shoutout_text, uptime_text
 from zaelbot.moderation import ModerationConfig, ModerationState, hate_command, sanction_line
 from zaelbot.permissions import allows, permission_level
-from zaelbot.recap import LiveStats, build_recap, clip_url, pick_top_clip, post_webhook
+from zaelbot.recap import DEFAULT_RECAP_CHANNEL_ID, LiveStats, build_recap, clip_url, pick_top_clip, post_webhook
 from zaelbot.store import atomic_write, ensure_copy, read_json
 from zaelbot.votes import (
     VoteBook,
@@ -681,11 +681,12 @@ class ZaelBot(commands.Bot):
         text = build_recap(self.live, pick_top_clip(clips))
         self.live.recapped = True
         _save_live(self.live)
+        channel_id = os.environ.get("DISCORD_RECAP_CHANNEL_ID") or DEFAULT_RECAP_CHANNEL_ID
         status = await asyncio.to_thread(post_webhook, os.environ.get("DISCORD_RECAP_WEBHOOK_URL", ""), text)
         if status:
-            log.info("Récap de fin de live envoyé (%s)", status)
+            log.info("Récap de fin de live envoyé dans %s (%s)", channel_id, status)
         else:
-            log.info("Récap de fin de live non posté : webhook absent ou refusé")
+            log.info("Récap de fin de live non posté dans %s : webhook absent ou refusé", channel_id)
 
     async def _remember_game(self) -> None:
         channel = await asyncio.to_thread(self.helix.channel)

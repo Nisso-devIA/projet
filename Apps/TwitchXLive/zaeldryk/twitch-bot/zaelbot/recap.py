@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from zaelbot.events import format_uptime
 
-DEFAULT_RECAP_CHANNEL_ID = "1541249724902809692"
+DEFAULT_RECAP_CHANNEL_ID = "1570024936565899357"
 
 
 class LiveStats:
