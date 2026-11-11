@@ -2,7 +2,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, ROOT_DIR } from "./config.js";
 import { getCachedContactCount, getStatusAudienceJids } from "./contact-cache.js";
+import { createStatusRetry, isServerAck, watchServerAck } from "./status-ack.js";
 import { rememberStory } from "./status-views.js";
+
+const retries = createStatusRetry();
+const ACK_TIMEOUT_MS = 20_000;
 
 const STATE_PATH = join(ROOT_DIR, "state", "last-live-status.json");
 const RATE_PATH = join(ROOT_DIR, "state", "story-rate.json");
@@ -65,7 +69,6 @@ function writeLastPosted(kind) {
     STATE_PATH,
     `${JSON.stringify({ kind, at: new Date().toISOString() }, null, 2)}\n`
   );
-  recordStoryPost();
 }
 
 function readStoryRate() {
@@ -123,24 +126,22 @@ export async function postTextStatus(sock, text, { backgroundColor, font } = {})
       font: font ?? la.statusFont ?? 2,
     }
   );
+  recordStoryPost();
 
-  const delivery = result?.status || "inconnu";
-  rememberStory({
-    id: result?.key?.id,
-    kind: "statut",
-    at: new Date().toISOString(),
-  });
+  let delivery = result?.status ?? null;
+  if (!isServerAck(delivery) && result?.key?.id) {
+    const waited = await watchServerAck(sock.ev, result.key.id, ACK_TIMEOUT_MS);
+    if (waited.acked) delivery = waited.status;
+  }
+  const acked = isServerAck(delivery);
   console.log(
-    `Story envoyée (${statusJidList.length} contacts, ${getExcludedStoryPhones().size} exclus, statut=${delivery}, cache=${getCachedContactCount()})`
+    `Story ${acked ? "confirmée" : "non confirmée"} (${statusJidList.length} contacts, ${getExcludedStoryPhones().size} exclus, statut=${delivery ?? "?"}, cache=${getCachedContactCount()})`
   );
-
-  if (delivery === "PENDING" || delivery === 0) {
-    console.warn(
-      "Story en attente — bug connu Baileys : peut ne pas apparaître sur le téléphone"
-    );
+  if (!acked) {
+    console.warn("Story sans accusé serveur (pending). Un seul nouvel essai si la connexion revient.");
   }
 
-  return { result, statusJidList, delivery, contactCount: getCachedContactCount() };
+  return { result, statusJidList, delivery, acked, contactCount: getCachedContactCount() };
 }
 
 export async function postLiveStory(sock, title = "") {
@@ -153,12 +154,18 @@ export async function postLiveStory(sock, title = "") {
     backgroundColor: la.liveBackgroundColor || "#9146FF",
     font: la.statusFont ?? 2,
   });
+  if (!info.acked) {
+    scheduleStatusRetry("live", title);
+    return info;
+  }
   rememberStory({
     id: info.result?.key?.id,
     kind: "live",
     at: new Date().toISOString(),
   });
   writeLastPosted("live");
+  retries.clear();
+  return info;
 }
 
 export async function postEndStory(sock) {
@@ -170,12 +177,18 @@ export async function postEndStory(sock) {
     backgroundColor: la.endBackgroundColor || "#1a1a2e",
     font: la.statusFont ?? 2,
   });
+  if (!info.acked) {
+    scheduleStatusRetry("end", "");
+    return info;
+  }
   rememberStory({
     id: info.result?.key?.id,
     kind: "end",
     at: new Date().toISOString(),
   });
   writeLastPosted("end");
+  retries.clear();
+  return info;
 }
 
 export async function postTestStory(sock) {
@@ -195,4 +208,26 @@ export async function postTestStory(sock) {
 
 export function getLastPostedKind() {
   return readLastPosted()?.kind || null;
+}
+
+export function scheduleStatusRetry(kind, title) {
+  const result = retries.schedule(kind, title);
+  if (result === "exhausted") {
+    console.log(`Story ${kind} non confirmée après le second essai. Aucun autre envoi.`);
+  }
+  return result;
+}
+
+export async function runPendingStatusRetry(sock) {
+  const job = retries.take();
+  if (!job || !sock) return null;
+  console.log(`Second essai unique de la story ${job.kind}`);
+  try {
+    if (job.kind === "end") return await postEndStory(sock);
+    return await postLiveStory(sock, job.title || "");
+  } catch (err) {
+    scheduleStatusRetry(job.kind, job.title || "");
+    console.error(`Second essai story ${job.kind} échoué : ${err.message}`);
+    return null;
+  }
 }

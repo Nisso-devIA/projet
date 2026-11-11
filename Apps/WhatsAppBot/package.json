@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "check": "node tools/check-bot.js",
+    "test": "node --test test/*.test.js",
     "watchdog": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/watchdog.ps1 -Restart"
   },
   "engines": {
