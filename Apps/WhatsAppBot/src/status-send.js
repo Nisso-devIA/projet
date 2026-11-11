@@ -32,11 +32,75 @@ export function chunkList(items, size) {
   return chunks;
 }
 
+export function bareLid(jid) {
+  const raw = String(jid || "");
+  if (!raw.endsWith("@lid") && !raw.endsWith("@hosted.lid")) return "";
+  const user = raw.split("@")[0].split(":")[0];
+  if (!user) return "";
+  return `${user}@lid`;
+}
+
 export function deviceToJid(device) {
+  if (typeof device?.jid === "string" && device.jid) return device.jid;
   const user = String(device?.user || "").replace(/\D/g, "");
   if (!user) return "";
+  const server = device?.server === "lid" ? "lid" : "s.whatsapp.net";
   const dev = Number(device?.device) || 0;
-  return dev ? `${user}:${dev}@s.whatsapp.net` : `${user}@s.whatsapp.net`;
+  return dev ? `${user}:${dev}@${server}` : `${user}@${server}`;
+}
+
+export async function resolveStatusRecipients(jids, { getLids, ownLid } = {}) {
+  const lids = new Set();
+  const phones = [];
+  for (const jid of jids || []) {
+    const lid = bareLid(jid);
+    if (lid) lids.add(lid);
+    else {
+      const phone = bareUserJid(jid);
+      if (phone) phones.push(phone);
+    }
+  }
+  const uniquePhones = [...new Set(phones)];
+  const own = bareLid(ownLid);
+  if (own) lids.add(own);
+  if (typeof getLids !== "function") {
+    return {
+      mode: "pn",
+      recipients: [...new Set(uniquePhones.concat([...lids]))],
+      resolved: 0,
+      unresolved: 0,
+    };
+  }
+  let resolved = 0;
+  let unresolved = 0;
+  for (const chunk of chunkList(uniquePhones, 20)) {
+    let rows = null;
+    try {
+      rows = await getLids(chunk);
+    } catch {
+      unresolved += chunk.length;
+      continue;
+    }
+    const found = new Map();
+    for (const row of rows || []) {
+      const phone = bareUserJid(row?.pn);
+      const lid = bareLid(row?.lid);
+      if (phone && lid) found.set(phone, lid);
+    }
+    for (const phone of chunk) {
+      const lid = found.get(phone);
+      if (lid) {
+        lids.add(lid);
+        resolved += 1;
+      } else {
+        unresolved += 1;
+      }
+    }
+  }
+  if (!lids.size) {
+    return { mode: "pn", recipients: uniquePhones, resolved: 0, unresolved };
+  }
+  return { mode: "lid", recipients: [...lids], resolved, unresolved };
 }
 
 export async function refreshStatusDevices(getUSyncDevices, recipients, chunkSize = DEVICE_FETCH_CHUNK) {
@@ -100,12 +164,15 @@ async function finishAttempt(send, waitAck, id) {
   let status = sent?.status ?? null;
   if (!statusConfirmed(status)) {
     const waited = await waitAck(id);
+    if (waited?.status === 479 || waited?.error === 479) return 479;
     if (waited?.acked) status = waited.status;
   }
   return status;
 }
 
 function statusConfirmed(status) {
+  if (status === 479 || status === "479" || status === 0 || status === "ERROR") return false;
+  if (status === "RECEIPT") return true;
   if (typeof status === "number") return status >= 2;
   return status === "SERVER_ACK" || status === "DELIVERY_ACK" || status === "READ" || status === "PLAYED";
 }

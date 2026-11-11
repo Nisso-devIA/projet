@@ -3,10 +3,11 @@ import { join } from "node:path";
 import { generateMessageIDV2 } from "@whiskeysockets/baileys";
 import { config, ROOT_DIR } from "./config.js";
 import { getCachedContactCount, getStatusAudienceJids } from "./contact-cache.js";
-import { createStatusRetry, isServerAck, watchServerAck } from "./status-ack.js";
+import { createStatusRetry, isServerAck, watchStatusDelivery } from "./status-ack.js";
 import {
   ensureStatusSessions,
   refreshStatusDevices,
+  resolveStatusRecipients,
   statusRecipients,
   deliverStatus,
 } from "./status-send.js";
@@ -101,7 +102,16 @@ export async function postTextStatus(sock, text, options = {}) {
     throw new Error("Stories désactivées dans la config");
   }
   if (options.countSlot !== false) assertStoryRateLimit();
-  const statusJidList = buildStatusJidList(sock);
+  const phoneList = buildStatusJidList(sock);
+  const mapping = sock.signalRepository?.lidMapping;
+  const audience = await resolveStatusRecipients(phoneList, {
+    getLids: mapping?.getLIDsForPNs?.bind(mapping),
+    ownLid: sock.user?.lid || sock.authState?.creds?.me?.lid,
+  });
+  const statusJidList = audience.recipients;
+  console.log(
+    `Story audience : ${phoneList.length} numéros, mode ${audience.mode}, LID ${audience.resolved}, sans LID ${audience.unresolved}`
+  );
 
   if (statusJidList.length < 1) {
     throw new Error(
@@ -137,7 +147,7 @@ export async function postTextStatus(sock, text, options = {}) {
     createId: () => messageId,
     maxAttempts,
     refresh,
-    waitAck: (id) => watchServerAck(sock.ev, id, ACK_TIMEOUT_MS),
+    waitAck: (id) => watchStatusDelivery(sock.ev, id, ACK_TIMEOUT_MS),
     send: async (id) => {
       const result = await sock.sendMessage("status@broadcast", content, { ...sendOptions, messageId: id });
       return { status: result?.status ?? null, result };
@@ -148,8 +158,10 @@ export async function postTextStatus(sock, text, options = {}) {
   console.log(
     `Story ${acked ? "confirmée" : "non confirmée"} id=${delivered.id} essais=${delivered.attempts} (${statusJidList.length} contacts, ${getExcludedStoryPhones().size} exclus, statut=${delivery ?? "?"}, cache=${getCachedContactCount()})`
   );
-  if (!acked) {
-    console.warn(`Story ${delivered.id} sans accusé serveur après ${delivered.attempts} essai(s) du même id.`);
+  if (delivery === 479) {
+    console.warn(`Story ${delivered.id} refusée par WhatsApp (ack 479).`);
+  } else if (!acked) {
+    console.warn(`Story ${delivered.id} sans accusé de remise après ${delivered.attempts} essai(s) du même id.`);
   }
 
   return {

@@ -5,6 +5,7 @@ import {
   chunkList,
   deliverStatus,
   refreshStatusDevices,
+  resolveStatusRecipients,
   statusRecipients,
 } from "../src/status-send.js";
 
@@ -51,6 +52,37 @@ test("sans accusé, le second envoi garde le même id", async () => {
   assert.equal(result.attempts, 2);
   assert.equal(result.acked, false);
   assert.equal(refreshes, 2);
+});
+
+test("les numéros résolus deviennent des LID, sans mélange", async () => {
+  const result = await resolveStatusRecipients(
+    ["33600000001@s.whatsapp.net", "33600000002@s.whatsapp.net", "999@lid"],
+    {
+      ownLid: "111:4@lid",
+      getLids: async (chunk) => chunk.slice(0, 1).map((pn) => ({ pn, lid: "555@lid" })),
+    }
+  );
+  assert.equal(result.mode, "lid");
+  assert.equal(result.resolved, 1);
+  assert.equal(result.unresolved, 1);
+  assert.equal(result.recipients.includes("555@lid"), true);
+  assert.equal(result.recipients.includes("111@lid"), true);
+  assert.equal(result.recipients.some((jid) => jid.endsWith("@s.whatsapp.net")), false);
+});
+
+test("un ack 479 n'est pas un succès et le second essai garde l'id", async () => {
+  const sent = [];
+  const result = await deliverStatus({
+    createId: () => "same-id",
+    refresh: async () => ({ chunks: 1, devices: 1, failedChunks: 0, deviceJids: [] }),
+    waitAck: async () => ({ acked: false, status: 479, error: 479 }),
+    send: async (id) => {
+      sent.push(id);
+      return { status: 1 };
+    },
+  });
+  assert.deepEqual(sent, ["same-id", "same-id"]);
+  assert.equal(result.acked, false);
 });
 
 test("un accusé serveur n'est pas renvoyé", async () => {
