@@ -1,0 +1,8 @@
+[
+  {
+    "name": "discord",
+    "message": "Le Discord du Royaume est ouvert : https://discord.gg/3vH2u7pme5",
+    "interval_seconds": 900,
+    "min_messages": 8
+  }
+]

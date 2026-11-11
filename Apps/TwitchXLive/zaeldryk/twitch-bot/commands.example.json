@@ -1,0 +1,30 @@
+{
+  "discord": {
+    "response": "Le Discord du Royaume : https://discord.gg/3vH2u7pme5",
+    "permission": "everyone",
+    "cooldown": 15,
+    "user_cooldown": 30,
+    "enabled": true
+  },
+  "tiktok": {
+    "response": "TikTok : https://www.tiktok.com/@zaeldryk",
+    "permission": "everyone",
+    "cooldown": 15,
+    "user_cooldown": 30,
+    "enabled": true
+  },
+  "planning": {
+    "response": "Le planning des lives est dans le Discord, salon planning. Chaîne : https://twitch.tv/zaeldryk",
+    "permission": "everyone",
+    "cooldown": 15,
+    "user_cooldown": 30,
+    "enabled": true
+  },
+  "commandes": {
+    "response": "",
+    "permission": "everyone",
+    "cooldown": 10,
+    "user_cooldown": 20,
+    "enabled": true
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "links": true,
+  "spam": true,
+  "caps": true,
+  "words": true,
+  "spam_max_messages": 5,
+  "spam_window_seconds": 10,
+  "repeat_count": 3,
+  "caps_min_length": 12,
+  "caps_ratio": 0.7,
+  "banned_words": [],
+  "timeouts_seconds": [60, 300, 600, 1800, 3600],
+  "permit_seconds": 60,
+  "strike_decay_seconds": 1800
+}
