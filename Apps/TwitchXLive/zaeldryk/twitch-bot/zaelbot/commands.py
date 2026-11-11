@@ -28,6 +28,12 @@ BUILTINS = {
     "regles",
     "addhate",
     "delhate",
+    "clip",
+    "mort",
+    "morts",
+    "mortreset",
+    "pari",
+    "sondage",
 }
 
 

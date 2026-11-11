@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from zaelbot.auth import SCOPES, parse_token_response
+from zaelbot.auth import BROADCASTER_SCOPES, SCOPES, parse_token_response
 ENV_PATH = ROOT / ".env"
 TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 DEVICE_URL = "https://id.twitch.tv/oauth2/device"
@@ -43,10 +43,14 @@ def load_env(path: Path) -> dict:
     return values
 
 
-def write_tokens(path: Path, access_token: str, refresh_token: str) -> None:
+def write_tokens(path: Path, access_token: str, refresh_token: str, who: str = "bot") -> None:
     current = load_env(path)
-    current["TWITCH_BOT_ACCESS_TOKEN"] = access_token
-    current["TWITCH_BOT_REFRESH_TOKEN"] = refresh_token
+    if who == "broadcaster":
+        current["TWITCH_BROADCASTER_ACCESS_TOKEN"] = access_token
+        current["TWITCH_BROADCASTER_REFRESH_TOKEN"] = refresh_token
+    else:
+        current["TWITCH_BOT_ACCESS_TOKEN"] = access_token
+        current["TWITCH_BOT_REFRESH_TOKEN"] = refresh_token
     lines = [f"{key}={value}" for key, value in current.items()]
     temporary = path.with_suffix(".env.tmp")
     temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -74,9 +78,13 @@ def client_credentials() -> tuple[str, str]:
     return client_id, client_secret
 
 
-def flow_device() -> int:
+def scopes_for(who: str) -> list[str]:
+    return BROADCASTER_SCOPES if who == "broadcaster" else SCOPES
+
+
+def flow_device(who: str) -> int:
     client_id, client_secret = client_credentials()
-    started = post_form(DEVICE_URL, {"client_id": client_id, "scopes": " ".join(SCOPES)})
+    started = post_form(DEVICE_URL, {"client_id": client_id, "scopes": " ".join(scopes_for(who))})
     print("Ouvre", started.get("verification_uri") or "https://www.twitch.tv/activate")
     print("Code :", started.get("user_code"))
     interval = int(started.get("interval") or 5)
@@ -101,22 +109,23 @@ def flow_device() -> int:
                 continue
             raise
         bundle = parse_token_response(payload)
-        write_tokens(ENV_PATH, bundle.access_token, bundle.refresh_token)
+        write_tokens(ENV_PATH, bundle.access_token, bundle.refresh_token, who)
         print("Jeton enregistré dans .env. Il n'est pas affiché.")
         return 0
 
 
-def flow_code() -> int:
+def flow_code(who: str) -> int:
     client_id, client_secret = client_credentials()
     query = urllib.parse.urlencode(
         {
             "client_id": client_id,
             "redirect_uri": REDIRECT,
             "response_type": "code",
-            "scope": " ".join(SCOPES),
+            "scope": " ".join(scopes_for(who)),
         }
     )
-    print("Ouvre cette adresse avec le COMPTE BOT :")
+    account = "COMPTE BROADCASTER (zaeldryk)" if who == "broadcaster" else "COMPTE BOT"
+    print(f"Ouvre cette adresse avec le {account} :")
     print(f"https://id.twitch.tv/oauth2/authorize?{query}")
     code_holder: dict[str, str] = {}
 
@@ -154,7 +163,7 @@ def flow_code() -> int:
         },
     )
     bundle = parse_token_response(payload)
-    write_tokens(ENV_PATH, bundle.access_token, bundle.refresh_token)
+    write_tokens(ENV_PATH, bundle.access_token, bundle.refresh_token, who)
     print("Jeton enregistré dans .env. Il n'est pas affiché.")
     return 0
 
@@ -162,10 +171,11 @@ def flow_code() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--flow", choices=("code", "device"), default="code")
+    parser.add_argument("--who", choices=("bot", "broadcaster"), default="bot")
     args = parser.parse_args()
     if args.flow == "device":
-        return flow_device()
-    return flow_code()
+        return flow_device(args.who)
+    return flow_code(args.who)
 
 
 if __name__ == "__main__":

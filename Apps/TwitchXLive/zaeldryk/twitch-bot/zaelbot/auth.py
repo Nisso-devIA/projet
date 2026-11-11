@@ -24,6 +24,14 @@ SCOPES = [
     "bits:read",
 ]
 
+# Ces scopes doivent être sur le jeton du broadcaster, pas sur celui du bot.
+# L'API des clips, paris et sondages exige que l'utilisateur du jeton soit zaeldryk.
+BROADCASTER_SCOPES = [
+    "clips:edit",
+    "channel:manage:predictions",
+    "channel:manage:polls",
+]
+
 
 @dataclass
 class TokenBundle:

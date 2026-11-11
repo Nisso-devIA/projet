@@ -16,12 +16,25 @@ from twitchio.ext import commands
 
 from zaelbot.auth import refresh_token
 from zaelbot.commands import CooldownBook, CommandBook, manage_command, parse_command, render_response, save_commands
+from zaelbot.deaths import DeathCounter
 from zaelbot.events import event_from_notification, render_event, tiktok_line
 from zaelbot.greeting import DEFAULT_DELAY_SECONDS, DEFAULT_RULES_TEXT, LiveGreeting
 from zaelbot.helix_text import followage_text, shoutout_text, uptime_text
 from zaelbot.moderation import ModerationConfig, ModerationState, hate_command, sanction_line
 from zaelbot.permissions import allows, permission_level
+from zaelbot.recap import LiveStats, build_recap, clip_url, pick_top_clip, post_webhook
 from zaelbot.store import atomic_write, ensure_copy, read_json
+from zaelbot.votes import (
+    VoteBook,
+    api_available,
+    parse_vote_args,
+    poll_body,
+    poll_end_body,
+    prediction_body,
+    prediction_end_body,
+    tally_text,
+)
+from zaelbot.welcome import FirstWelcome, is_known_bot
 from zaelbot.tiktok_filter import TikTokFilter
 from zaelbot.timers import Timer, TimerScheduler
 
@@ -92,6 +105,40 @@ def _load_timers() -> TimerScheduler:
     return TimerScheduler(timers)
 
 
+def _load_deaths() -> DeathCounter:
+    raw = read_json(DATA / "deaths.json", {})
+    return DeathCounter.from_dict(raw if isinstance(raw, dict) else {})
+
+
+def _load_welcomes() -> FirstWelcome:
+    raw = read_json(DATA / "seen-chatters.json", {})
+    logins = raw.get("logins") if isinstance(raw, dict) else []
+    invite = os.environ.get("DISCORD_INVITE_URL", "https://discord.gg/3vH2u7pme5")
+    try:
+        gap = float(os.environ.get("FIRST_WELCOME_GAP_SECONDS") or 12)
+    except ValueError:
+        gap = 12
+    return FirstWelcome(logins if isinstance(logins, list) else [], invite, gap)
+
+
+def _load_live() -> LiveStats:
+    raw = read_json(DATA / "live-stats.json", {})
+    return LiveStats(raw if isinstance(raw, dict) else {})
+
+
+def _save_deaths(counter: DeathCounter) -> None:
+    atomic_write(DATA / "deaths.json", counter.export())
+
+
+def _save_welcomes(book: FirstWelcome) -> None:
+    atomic_write(DATA / "seen-chatters.json", book.export())
+    book.dirty = False
+
+
+def _save_live(stats: LiveStats) -> None:
+    atomic_write(DATA / "live-stats.json", stats.export())
+
+
 def _load_templates() -> dict:
     ensure_copy(ROOT / "events.example.json", DATA / "events.json")
     raw = read_json(DATA / "events.json", {})
@@ -103,10 +150,17 @@ class Helix:
         self.client_id = client_id
         self.token = token
 
-    def _request(self, method: str, path: str, body: dict | None = None, query: dict | None = None):
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict | None = None,
+        query: dict | None = None,
+        token: str | None = None,
+    ):
         url = "https://api.twitch.tv/helix" + path
         if query:
-            url += "?" + urllib.parse.urlencode(query)
+            url += "?" + urllib.parse.urlencode(query, doseq=True)
         data = json.dumps(body).encode() if body is not None else None
         request = urllib.request.Request(
             url,
@@ -114,7 +168,7 @@ class Helix:
             method=method,
             headers={
                 "Client-Id": self.client_id,
-                "Authorization": f"Bearer {self.token}",
+                "Authorization": f"Bearer {token or self.token}",
                 "Content-Type": "application/json",
             },
         )
@@ -201,6 +255,37 @@ class Helix:
             },
         )
 
+    def create_clip(self, broadcaster_token: str) -> tuple[int, str]:
+        status, payload = self._request(
+            "POST",
+            "/clips",
+            query={"broadcaster_id": BROADCASTER_ID},
+            token=broadcaster_token,
+        )
+        clip_id = ""
+        data = payload.get("data") or []
+        if data:
+            clip_id = str(data[0].get("id") or "")
+        return status, clip_id
+
+    def clip_by_id(self, clip_id: str, broadcaster_token: str) -> dict | None:
+        status, payload = self._request("GET", "/clips", query={"id": clip_id}, token=broadcaster_token)
+        if status != 200 or not payload.get("data"):
+            return None
+        return payload["data"][0]
+
+    def create_prediction(self, body: dict, broadcaster_token: str) -> tuple[int, dict]:
+        return self._request("POST", "/predictions", body=body, token=broadcaster_token)
+
+    def end_prediction(self, body: dict, broadcaster_token: str) -> tuple[int, dict]:
+        return self._request("PATCH", "/predictions", body=body, token=broadcaster_token)
+
+    def create_poll(self, body: dict, broadcaster_token: str) -> tuple[int, dict]:
+        return self._request("POST", "/polls", body=body, token=broadcaster_token)
+
+    def end_poll(self, body: dict, broadcaster_token: str) -> tuple[int, dict]:
+        return self._request("PATCH", "/polls", body=body, token=broadcaster_token)
+
     def shoutout(self, to_broadcaster_id: str) -> None:
         self._request(
             "POST",
@@ -236,6 +321,10 @@ class ZaelBot(commands.Bot):
         self.cooldowns = CooldownBook()
         self.relay_enabled = os.environ.get("TIKTOK_RELAY", "0") == "1"
         self.greeting = _load_greeting()
+        self.deaths = _load_deaths()
+        self.welcomes = _load_welcomes()
+        self.live = _load_live()
+        self.votes = VoteBook()
         self.tiktok_filter = TikTokFilter()
         self.helix = Helix(os.environ["TWITCH_CLIENT_ID"], token)
         self._token = token
@@ -269,8 +358,23 @@ class ZaelBot(commands.Bot):
         if action is not None:
             await self._apply_sanction(message, action)
             return
+        login = author.name or ""
+        if not is_known_bot(login, BOT_LOGIN):
+            self.live.add_chatter(login)
+            _save_live(self.live)
+        welcome = self.welcomes.consider(
+            login,
+            _wall_now(),
+            is_broadcaster=login.lower() == CHANNEL_LOGIN or level == "broadcaster",
+            bot_login=BOT_LOGIN,
+        )
+        if self.welcomes.dirty:
+            _save_welcomes(self.welcomes)
+        if welcome:
+            await message.channel.send(welcome[:450])
         parsed = parse_command(text)
         if parsed is None:
+            self.votes.cast(login, text, _wall_now())
             self.timers.on_chat_message()
             return
         name, args = parsed
@@ -304,6 +408,12 @@ class ZaelBot(commands.Bot):
                 return "Usage : !permit pseudo"
             self.moderation.grant_permit(target, now)
             return f"{target} peut poster un lien pendant {int(self.moderation.config.permit_seconds)} s."
+        if name == "clip":
+            return await self._clip_command(author, now)
+        if name in {"mort", "morts", "mortreset"}:
+            return self._death_command(name, args, level, now)
+        if name in {"pari", "sondage"}:
+            return await self._vote_command(name, args, level)
         if name == "relais":
             if not allows(level, "mod"):
                 return "Réservé aux modérateurs."
@@ -313,7 +423,21 @@ class ZaelBot(commands.Bot):
             self.relay_enabled = choice == "on"
             return "Relais TikTok activé." if self.relay_enabled else "Relais TikTok coupé."
         if name in {"commandes", "commands"}:
-            names = ["uptime", "followage", "so", "titre", "jeu", "permit", "relais", "regles"] + self.book.visible_names()
+            names = [
+                "uptime",
+                "followage",
+                "so",
+                "titre",
+                "jeu",
+                "permit",
+                "relais",
+                "regles",
+                "clip",
+                "mort",
+                "morts",
+                "pari",
+                "sondage",
+            ] + self.book.visible_names()
             return "Commandes : " + ", ".join(f"!{item}" for item in names)
         if name in {"uptime", "followage", "so", "shoutout", "titre", "title", "jeu", "game"}:
             if not self.cooldowns.ready(name, author.name, now, 10, 15):
@@ -367,6 +491,8 @@ class ZaelBot(commands.Bot):
             game_id = self.helix.search_game(args)
             if not game_id or not self.helix.set_channel(game_id=game_id):
                 return "Le jeu n'a pas pu être changé."
+            self.deaths.set_game(args)
+            _save_deaths(self.deaths)
             return "Jeu mis à jour."
         return None
 
@@ -399,6 +525,7 @@ class ZaelBot(commands.Bot):
             os.environ["TWITCH_BOT_REFRESH_TOKEN"] = bundle.refresh_token
             _write_env_tokens(bundle.access_token, bundle.refresh_token)
             log.info("Jeton du bot rafraîchi")
+            await self._refresh_broadcaster_token()
 
     async def _eventsub_loop(self) -> None:
         import aiohttp
@@ -421,8 +548,12 @@ class ZaelBot(commands.Bot):
                                 url = payload["session"]["reconnect_url"]
                                 break
                             elif kind == "notification":
-                                if payload.get("subscription", {}).get("type") == "stream.online":
-                                    await self._on_stream_online(payload.get("event") or {})
+                                event_type = payload.get("subscription", {}).get("type")
+                                event = payload.get("event") or {}
+                                if event_type == "stream.online":
+                                    await self._on_stream_online(event)
+                                elif event_type == "stream.offline":
+                                    await self._on_stream_offline()
                                 else:
                                     await self._on_notification(payload)
             except Exception as exc:
@@ -439,6 +570,7 @@ class ZaelBot(commands.Bot):
             ("channel.cheer", "1", {"broadcaster_user_id": BROADCASTER_ID}),
             ("channel.raid", "1", {"to_broadcaster_user_id": BROADCASTER_ID}),
             ("stream.online", "1", {"broadcaster_user_id": BROADCASTER_ID}),
+            ("stream.offline", "1", {"broadcaster_user_id": BROADCASTER_ID}),
         ]
         for event_type, version, condition in specs:
             status = self.helix.subscribe_event(session_id, event_type, version, condition)
@@ -456,6 +588,8 @@ class ZaelBot(commands.Bot):
         if channel is None or not text:
             return
         await channel.send(text[:450])
+        self.live.note_event(kind, data)
+        _save_live(self.live)
         if kind == "raid" and data.get("from_id"):
             await asyncio.to_thread(self.helix.shoutout, data["from_id"])
 
@@ -520,12 +654,197 @@ class ZaelBot(commands.Bot):
     async def _greet_current_live(self) -> None:
         started = await asyncio.to_thread(self.helix.stream_started_at)
         if started:
+            self.live.begin(started)
+            _save_live(self.live)
+            await self._remember_game()
             await self._schedule_greeting(started, started)
 
     async def _on_stream_online(self, event: dict) -> None:
         started = str(event.get("started_at") or "")
         if started:
+            self.live.begin(started)
+            _save_live(self.live)
+            await self._remember_game()
             await self._schedule_greeting(started, started)
+
+    async def _on_stream_offline(self) -> None:
+        if not self.live.started_at or self.live.recapped:
+            return
+        token = os.environ.get("TWITCH_BROADCASTER_ACCESS_TOKEN", "")
+        clips = []
+        for clip_id in self.live.clip_ids:
+            info = await asyncio.to_thread(self.helix.clip_by_id, clip_id, token) if token else None
+            if info:
+                clips.append(info)
+            else:
+                clips.append({"id": clip_id, "view_count": 0, "url": clip_url(clip_id)})
+        text = build_recap(self.live, pick_top_clip(clips))
+        self.live.recapped = True
+        _save_live(self.live)
+        status = await asyncio.to_thread(post_webhook, os.environ.get("DISCORD_RECAP_WEBHOOK_URL", ""), text)
+        if status:
+            log.info("Récap de fin de live envoyé (%s)", status)
+        else:
+            log.info("Récap de fin de live non posté : webhook absent ou refusé")
+
+    async def _remember_game(self) -> None:
+        channel = await asyncio.to_thread(self.helix.channel)
+        name = channel.get("game_name") or ""
+        if name:
+            self.deaths.set_game(name)
+            _save_deaths(self.deaths)
+
+    async def _refresh_broadcaster_token(self) -> None:
+        refresh_value = os.environ.get("TWITCH_BROADCASTER_REFRESH_TOKEN", "")
+        if not refresh_value:
+            return
+        try:
+            bundle = await asyncio.to_thread(
+                refresh_token,
+                os.environ["TWITCH_CLIENT_ID"],
+                os.environ["TWITCH_CLIENT_SECRET"],
+                refresh_value,
+            )
+        except Exception as exc:
+            log.warning("Refresh du jeton broadcaster impossible : %s", exc)
+            return
+        os.environ["TWITCH_BROADCASTER_ACCESS_TOKEN"] = bundle.access_token
+        os.environ["TWITCH_BROADCASTER_REFRESH_TOKEN"] = bundle.refresh_token
+        _write_env_values(
+            {
+                "TWITCH_BROADCASTER_ACCESS_TOKEN": bundle.access_token,
+                "TWITCH_BROADCASTER_REFRESH_TOKEN": bundle.refresh_token,
+            }
+        )
+        log.info("Jeton broadcaster rafraîchi")
+
+    async def _clip_command(self, author, now: float) -> str | None:
+        if not self.cooldowns.ready("clip", author.name, now, 120, 0):
+            return "Le clip est en pause pour deux minutes."
+        token = os.environ.get("TWITCH_BROADCASTER_ACCESS_TOKEN", "")
+        if not token:
+            return "Le clip demande le jeton broadcaster (clips:edit)."
+        status, clip_id = await asyncio.to_thread(self.helix.create_clip, token)
+        if not api_available(status) or not clip_id:
+            return "Le clip n'a pas pu être créé."
+        self.cooldowns.mark("clip", author.name, now, 120, 0)
+        url = clip_url(clip_id)
+        self.live.add_clip(clip_id)
+        _save_live(self.live)
+        who = author.display_name or author.name
+        posted = await asyncio.to_thread(
+            post_webhook,
+            os.environ.get("DISCORD_CLIPS_WEBHOOK_URL", ""),
+            f"Nouveau clip de {who} : {url}",
+        )
+        if posted:
+            log.info("Clip publié dans le salon clips")
+        else:
+            log.info("Clip non publié sur Discord : webhook clips absent ou refusé")
+        return f"Clip : {url}"
+
+    def _death_command(self, name: str, args: str, level: str, now: float) -> str | None:
+        if name == "morts":
+            return f"Morts sur {self.deaths.game} : {self.deaths.total()}"
+        if name == "mortreset" or args.strip().lower() == "reset":
+            if not allows(level, "mod"):
+                return "Réservé aux modérateurs."
+            self.deaths.reset()
+            self.live.reset_deaths(self.deaths.game)
+            _save_deaths(self.deaths)
+            _save_live(self.live)
+            return f"Compteur remis à zéro pour {self.deaths.game}."
+        if not self.cooldowns.ready("mort", "mort", now, 10, 0):
+            return "Le compteur est en pause quelques secondes."
+        if args.strip() == "-1":
+            if not allows(level, "mod"):
+                return "Réservé aux modérateurs."
+            total = self.deaths.add(-1)
+            self.live.add_death(self.deaths.game, -1)
+        elif args.strip():
+            return "Usage : !mort, !mort -1 ou !mortreset"
+        else:
+            if not allows(level, "vip"):
+                return "Réservé aux VIP et aux modérateurs."
+            total = self.deaths.add(1)
+            self.live.add_death(self.deaths.game, 1)
+        self.cooldowns.mark("mort", "mort", now, 10, 0)
+        _save_deaths(self.deaths)
+        _save_live(self.live)
+        return f"Morts sur {self.deaths.game} : {total}"
+
+    async def _vote_command(self, name: str, args: str, level: str) -> str | None:
+        if not allows(level, "mod"):
+            return "Réservé aux modérateurs."
+        if self.votes.current is not None and parse_vote_args(args).get("action") == "start":
+            return "Un vote est déjà en cours."
+        parsed = parse_vote_args(args)
+        if parsed["action"] == "error":
+            return parsed["message"]
+        if parsed["action"] == "cancel":
+            return await self._close_vote(cancel=True, index=None)
+        if parsed["action"] == "finish":
+            return await self._close_vote(cancel=False, index=parsed.get("index"))
+        spec = parsed["spec"]
+        spec.seconds = max(30 if name == "pari" else 15, min(1800, spec.seconds))
+        if name == "sondage" and len(spec.choices) > 5:
+            return "Un sondage Twitch accepte 5 choix maximum."
+        token = os.environ.get("TWITCH_BROADCASTER_ACCESS_TOKEN", "")
+        if token:
+            opened = await self._open_helix_vote(name, spec, token)
+            if opened:
+                return opened
+        return self.votes.open_chat(name, spec, _wall_now())
+
+    async def _open_helix_vote(self, name: str, spec, token: str) -> str | None:
+        if name == "pari":
+            status, payload = await asyncio.to_thread(
+                self.helix.create_prediction, prediction_body(BROADCASTER_ID, spec), token
+            )
+        else:
+            status, payload = await asyncio.to_thread(self.helix.create_poll, poll_body(BROADCASTER_ID, spec), token)
+        if not api_available(status):
+            return None
+        data = (payload.get("data") or [{}])[0]
+        remote_id = str(data.get("id") or "")
+        outcomes = data.get("outcomes") or data.get("choices") or []
+        outcome_ids = [str(item.get("id") or "") for item in outcomes]
+        self.votes.open_remote(name, spec, _wall_now(), remote_id, outcome_ids)
+        label = "Pari" if name == "pari" else "Sondage"
+        return f"{label} lancé : {spec.title} ({spec.seconds}s)."
+
+    async def _close_vote(self, *, cancel: bool, index: int | None) -> str:
+        current = self.votes.current
+        if current is None:
+            return "Aucun pari ou sondage en cours."
+        if current.mode == "chat":
+            closed = self.votes.close()
+            if cancel or closed is None:
+                return "Vote annulé."
+            if index and not (1 <= index <= len(closed.choices)):
+                self.votes.current = closed
+                return "Choix introuvable."
+            return tally_text(closed)
+        token = os.environ.get("TWITCH_BROADCASTER_ACCESS_TOKEN", "")
+        if current.kind == "pari":
+            outcome_id = None
+            if not cancel:
+                if index is None or not (1 <= index <= len(current.outcome_ids)):
+                    return "Usage : !pari fin 1"
+                outcome_id = current.outcome_ids[index - 1]
+            body = prediction_end_body(BROADCASTER_ID, current.remote_id, outcome_id)
+            status, _payload = await asyncio.to_thread(self.helix.end_prediction, body, token)
+        else:
+            body = poll_end_body(BROADCASTER_ID, current.remote_id, cancel=cancel)
+            status, _payload = await asyncio.to_thread(self.helix.end_poll, body, token)
+        if not api_available(status):
+            return "Twitch n'a pas pu clôturer le vote."
+        self.votes.close()
+        if cancel:
+            return "Vote annulé sur Twitch."
+        if current.kind == "pari" and index:
+            return f"Pari terminé. Gagnant : {current.choices[index - 1]}."
+        return "Sondage terminé."
 
     async def _schedule_greeting(self, stream_id: str, started_at: str) -> None:
         if not self.greeting.claim(stream_id):
@@ -583,14 +902,19 @@ def _now() -> float:
 
 
 def _write_env_tokens(access_token: str, refresh_token_value: str) -> None:
+    _write_env_values(
+        {
+            "TWITCH_BOT_ACCESS_TOKEN": access_token,
+            "TWITCH_BOT_REFRESH_TOKEN": refresh_token_value,
+        }
+    )
+
+
+def _write_env_values(updates: dict) -> None:
     path = ROOT / ".env"
     if not path.exists():
         return
     lines = path.read_text(encoding="utf-8").splitlines()
-    updates = {
-        "TWITCH_BOT_ACCESS_TOKEN": access_token,
-        "TWITCH_BOT_REFRESH_TOKEN": refresh_token_value,
-    }
     seen = set()
     out = []
     for line in lines:

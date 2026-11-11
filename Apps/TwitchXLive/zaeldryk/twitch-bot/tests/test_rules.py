@@ -21,10 +21,12 @@ class NormalizeTests(unittest.TestCase):
         for message in ("N1QU3", "n i q u e", "n.i.q.u.e", "niiique", "énculé"):
             self.assertTrue(contains_term(message, "nique") or contains_term(message, "encule"), message)
         self.assertEqual(normalize_text("enculé"), "encule")
-        for innocent in ("niquel", "nike", "putain", "je me suis attardé"):
+        for innocent in ("niquel", "nike", "poutine", "député", "computer", "réputation"):
             self.assertFalse(contains_term(innocent, "nique"), innocent)
             self.assertFalse(contains_term(innocent, "nik"), innocent)
             self.assertFalse(contains_term(innocent, "pute"), innocent)
+            self.assertFalse(contains_term(innocent, "putain"), innocent)
+            self.assertFalse(contains_term(innocent, "putin"), innocent)
 
 
 class HateSpamPromoTests(unittest.TestCase):
@@ -43,8 +45,18 @@ class HateSpamPromoTests(unittest.TestCase):
         self.assertIsNone(self.state.inspect("zaeldryk", "faggot", 4, level="broadcaster"))
 
     def test_false_friends_are_not_hate_or_insults(self):
-        for text in ("c'est niquel", "j'ai des nike", "oh putain"):
-            self.assertIsNone(self.state.inspect("viewer", text, 0), text)
+        for index, text in enumerate(("c'est niquel", "j'ai des nike", "une poutine", "le député", "computer", "sa réputation", "disputer", "imputer")):
+            self.assertIsNone(self.state.inspect(f"viewer{index}", text, index * 100), text)
+
+    def test_putain_family_is_vulgar(self):
+        samples = ("oh putain", "putains", "pute", "des putes", "putin", "ptn", "put1", "p.u.t.e", "puuuutain")
+        for index, text in enumerate(samples):
+            action = self.state.inspect(f"viewer{index}", text, index)
+            self.assertIsNotNone(action, text)
+            self.assertEqual(action.reason, "vulgarite", text)
+            self.assertEqual(action.action, "warn", text)
+            self.assertNotIn("putain", action.warning.casefold())
+            self.assertNotIn("pute", action.warning.casefold())
 
     def test_spam_bot_bans_and_skips_vip(self):
         self.assertEqual(self.state.inspect("bot", "best viewers on streamboo", 0).action, "ban")

@@ -12,8 +12,14 @@ Bot de chat pour [twitch.tv/zaeldryk](https://twitch.tv/zaeldryk). Il remplace W
 - Les propos haineux (liste dans `moderation.example.json`, extensible avec `!addhate` et `!delhate`) suppriment le message et bannissent tout de suite. Seuls le broadcaster et les mods y échappent : un VIP n’y échappe pas.
 - Le spam de vente de viewers, followers ou primes, et les raccourcis suspects, suppriment le message et bannissent.
 - La pub vers une autre chaîne ou un autre Discord supprime le message et prévient en public. Les liens de Zaeldryk (Twitch, TikTok, YouTube, Kick, Discord `3vH2u7pme5`) passent. `!permit` autorise un lien.
-- Les insultes suivent trois paliers, mémorisés 30 jours dans `data/vulgar-strikes.json` : avertissement, timeout de 5 minutes, puis ban. Le journal `logs/moderation.log` note qui, quelle règle et quelle action, sans recopier le mot.
-- Deux minutes après le début de chaque live, le bot envoie une fois le texte de `regles.example.txt`. `!regles` renvoie le même texte. L’identifiant du live est retenu dans `data/greeting.json` : un redémarrage pendant ce live ne renvoie pas le message. Le délai est `delay_seconds` dans `greeting.example.json`.
+- Les insultes suivent trois paliers, mémorisés 30 jours dans `data/vulgar-strikes.json` : avertissement, timeout de 5 minutes, puis ban. Ça couvre « putain », « pute » et les contournements (`putin`, `ptn`, `put1`, lettres séparées). « poutine », « député », « réputation », « niquel » et « nike » passent. Le journal `logs/moderation.log` note qui, quelle règle et quelle action, sans recopier le mot.
+- Deux minutes après le début de chaque live, le bot envoie une fois le texte de `regles.example.txt` dans le chat Twitch. Ce n’est pas une annonce Discord : le début de live Discord est déjà géré ailleurs. `!regles` renvoie le même texte. L’identifiant du live est retenu dans `data/greeting.json` : un redémarrage pendant ce live ne renvoie pas le message. Le délai est `delay_seconds` dans `greeting.example.json`.
+- `!discord` est dans `commands.example.json`. Le rappel automatique part toutes les 20 minutes, seulement si le chat a envoyé au moins `min_messages` messages depuis le dernier rappel (`timers.example.json`, 8 par défaut).
+- `!clip` crée un clip Twitch (cooldown 2 minutes) et répond avec le lien. Le même lien est posté uniquement dans 🎬-clips, via `DISCORD_CLIPS_WEBHOOK_URL`, sans @everyone. Jamais dans 𝕋-twitch.
+- `!mort` ajoute une mort (VIP, mods, broadcaster, cooldown 10 secondes). `!morts` affiche le total du jeu en cours. Les mods ont `!mort -1` et `!mortreset`. Les totaux sont dans `data/deaths.json`, un compteur par jeu.
+- `!pari "Question ?" Oui | Non 120` et `!sondage "Question ?" A | B 60` utilisent l’API Twitch (mods et broadcaster). `!pari fin 1` désigne le gagnant, `!pari annule` et `!sondage annule` ferment. Si la chaîne n’est pas affiliée ou si le jeton est refusé, le vote continue dans le chat : les viewers tapent le numéro.
+- Le premier message d’un viewer est salué avec le lien Discord, une seule fois, mémorisé dans `data/seen-chatters.json`. Les bots et le broadcaster ne le sont pas. Un écart (`FIRST_WELCOME_GAP_SECONDS`) empêche un raid de noyer le chat.
+- À `stream.offline`, un récap part sur Discord (durée, follows, abonnements, cadeaux, raids, morts du live par jeu, chatter les plus actifs, clip le plus vu). Le webhook vise par défaut 📢-annonces (`1541249724902809692`), sans @everyone. Ce n’est pas une annonce de début de live.
 - EventSub envoie un message pour les follows, les abonnements, les réabonnements, les gifts, les raids et les bits. Un raid lance aussi un `/shoutout`.
 - `!uptime`, `!followage`, `!so pseudo`, `!titre` et `!jeu`. Sans argument, `!titre` et `!jeu` affichent la valeur actuelle. Avec un argument, un mod peut la changer.
 - `!relais on` et `!relais off` coupent ou ouvrent le relais du chat TikTok Live de `@zaeldryk`. Le format est `🎵 pseudo : message`. Si TikTok bloque la connexion, le bot Twitch continue.
@@ -50,6 +56,16 @@ python3 scripts/get_token.py --flow code
 ```
 
 Ouvre le lien affiché **en étant connecté au compte bot**. Le script écrit `TWITCH_BOT_ACCESS_TOKEN` et `TWITCH_BOT_REFRESH_TOKEN` dans `.env` et ne les affiche pas.
+
+Pour les clips, les paris et les sondages, un second jeton est nécessaire, celui du compte `zaeldryk` :
+
+```bash
+python3 scripts/get_token.py --flow code --who broadcaster
+```
+
+Ouvre le lien en étant connecté à zaeldryk. Les scopes demandés sont `clips:edit`, `channel:manage:predictions` et `channel:manage:polls`. Le script écrit `TWITCH_BROADCASTER_ACCESS_TOKEN` et `TWITCH_BROADCASTER_REFRESH_TOKEN` sans les afficher.
+
+Crée ensuite deux webhooks Discord, un dans 🎬-clips et un dans 📢-annonces. Colle les URL dans `DISCORD_CLIPS_WEBHOOK_URL` et `DISCORD_RECAP_WEBHOOK_URL`. Ne pointe pas le webhook clips vers 𝕋-twitch. Les paris et sondages natifs demandent une chaîne affiliée ; sinon le bot bascule sur un vote dans le chat.
 
 Si le flux par code est refusé, utilise :
 
@@ -95,7 +111,7 @@ Le journal du bot est `twitch-bot/logs/bot.log`. Le service redémarre tout seul
 
 Reporte les commandes dans `data/commands.json` (créé au premier lancement à partir de l’exemple), les timers dans `data/timers.json`, les mots dans `data/moderation.json`.
 
-Ce bot ne reprend pas les points, les duels, les quotes, les giveaways ni le song request. Les annonces de live Discord restent gérées par l’autre service Zaeldryk.
+Ce bot ne reprend pas les points, les duels, les quotes, les giveaways ni le song request. L’XP et les rangs Discord de Zaeldryk Guardian ne sont pas reliés à ce bot. Les annonces de début de live Discord restent gérées par l’autre service Zaeldryk.
 
 Coupe WizeBot seulement quand ce service est démarré et qu’un mod a testé `!discord` et `!commandes`.
 

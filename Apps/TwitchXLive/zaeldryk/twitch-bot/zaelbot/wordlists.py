@@ -62,6 +62,10 @@ VULGAR_WORDS = [
     "connasse",
     "salope",
     "pute",
+    "putain",
+    "putin",
+    "ptn",
+    "puti",
     "batard",
 ]
 
