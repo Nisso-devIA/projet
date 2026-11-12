@@ -32,7 +32,7 @@
 
   "liveAnnounce": {
 
-    "enabled": true,
+    "enabled": false,
 
     "modeFile": "/home/ubuntu/zaeldryk/state/mode.txt",
 
