@@ -128,13 +128,13 @@ class ModerationState:
         hate_free = level in {"mod", "broadcaster"}
         ordinary_free = level in {"vip", "mod", "broadcaster"}
 
-        if self.config.hate and not hate_free and contains_any(body, self.config.hate_words):
+        if self.config.hate and not hate_free and contains_any(body, self.config.hate_words, spaced_variants=True):
             return self._action("haine", "ban", 0, 1, f"@{user}, ces propos sont interdits. Tu es banni.")
 
         if not ordinary_free and self.config.spam_bots and self._is_spam_bot(body, first_message):
             return self._action("spam-bot", "ban", 0, 1, f"@{user}, ce message est du spam. Tu es banni.")
 
-        if not ordinary_free and self.config.vulgar and contains_any(body, self.config.vulgar_words):
+        if not ordinary_free and self.config.vulgar and contains_any(body, self.config.vulgar_words, spaced_variants=True):
             strike = self._vulgar_strike(user, now)
             if strike >= 3:
                 return self._action("vulgarite", "ban", 0, strike, f"@{user}, tu es banni après plusieurs insultes.")

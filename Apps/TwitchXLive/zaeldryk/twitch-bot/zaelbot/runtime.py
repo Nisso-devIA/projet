@@ -7,6 +7,7 @@ import datetime
 import json
 import logging
 import os
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -47,6 +48,7 @@ BOT_LOGIN = os.environ.get("TWITCH_BOT_LOGIN", "").lower()
 BOT_USER_ID = os.environ.get("TWITCH_BOT_USER_ID", "")
 
 log = logging.getLogger("zaelbot")
+_BROADCASTER_REFRESH = threading.Lock()
 
 
 def _setup_logging() -> None:
@@ -162,13 +164,16 @@ class Helix:
         if query:
             url += "?" + urllib.parse.urlencode(query, doseq=True)
         data = json.dumps(body).encode() if body is not None else None
+        auth = token or self.token
+        if auth.startswith("oauth:"):
+            auth = auth[6:]
         request = urllib.request.Request(
             url,
             data=data,
             method=method,
             headers={
                 "Client-Id": self.client_id,
-                "Authorization": f"Bearer {token or self.token}",
+                "Authorization": f"Bearer {auth}",
                 "Content-Type": "application/json",
             },
         )
@@ -177,7 +182,13 @@ class Helix:
                 raw = response.read()
                 return response.status, json.loads(raw) if raw else {}
         except urllib.error.HTTPError as exc:
-            return exc.code, {}
+            detail = ""
+            try:
+                payload = json.loads(exc.read().decode() or "{}")
+                detail = str(payload.get("message") or "")[:180]
+            except (OSError, json.JSONDecodeError, UnicodeError):
+                detail = ""
+            return exc.code, {"message": detail}
 
     def stream_started_at(self) -> str | None:
         status, payload = self._request("GET", "/streams", query={"user_id": BROADCASTER_ID})
@@ -297,8 +308,15 @@ class Helix:
             },
         )
 
-    def subscribe_event(self, session_id: str, event_type: str, version: str, condition: dict) -> int:
-        status, _ = self._request(
+    def subscribe_event(
+        self,
+        session_id: str,
+        event_type: str,
+        version: str,
+        condition: dict,
+        token: str | None = None,
+    ) -> tuple[int, dict]:
+        return self._request(
             "POST",
             "/eventsub/subscriptions",
             body={
@@ -307,8 +325,8 @@ class Helix:
                 "condition": condition,
                 "transport": {"method": "websocket", "session_id": session_id},
             },
+            token=token,
         )
-        return status
 
 
 class ZaelBot(commands.Bot):
@@ -528,9 +546,29 @@ class ZaelBot(commands.Bot):
             await self._refresh_broadcaster_token()
 
     async def _eventsub_loop(self) -> None:
+        moderator = BOT_USER_ID or BROADCASTER_ID
+        bot_specs = [
+            ("channel.follow", "2", {"broadcaster_user_id": BROADCASTER_ID, "moderator_user_id": moderator}),
+            ("channel.raid", "1", {"to_broadcaster_user_id": BROADCASTER_ID}),
+            ("stream.online", "1", {"broadcaster_user_id": BROADCASTER_ID}),
+            ("stream.offline", "1", {"broadcaster_user_id": BROADCASTER_ID}),
+        ]
+        broadcaster_specs = [
+            ("channel.subscribe", "1", {"broadcaster_user_id": BROADCASTER_ID}),
+            ("channel.subscription.message", "1", {"broadcaster_user_id": BROADCASTER_ID}),
+            ("channel.subscription.gift", "1", {"broadcaster_user_id": BROADCASTER_ID}),
+            ("channel.cheer", "1", {"broadcaster_user_id": BROADCASTER_ID}),
+        ]
+        await asyncio.gather(
+            self._eventsub_socket(bot_specs, False),
+            self._eventsub_socket(broadcaster_specs, True),
+        )
+
+    async def _eventsub_socket(self, specs: list[tuple[str, str, dict]], use_broadcaster: bool) -> None:
         import aiohttp
 
-        url = "wss://eventsub.wss.twitch.tv/ws?keepalive_timeout_seconds=30"
+        default_url = "wss://eventsub.wss.twitch.tv/ws?keepalive_timeout_seconds=30"
+        url = default_url
         while True:
             try:
                 async with aiohttp.ClientSession() as session:
@@ -542,8 +580,13 @@ class ZaelBot(commands.Bot):
                             kind = message.get("metadata", {}).get("message_type")
                             payload = message.get("payload", {})
                             if kind == "session_welcome":
-                                session_id = payload["session"]["id"]
-                                await asyncio.to_thread(self._subscribe_all, session_id)
+                                token = None
+                                if use_broadcaster:
+                                    token = await asyncio.to_thread(self._current_broadcaster_token)
+                                    if not token:
+                                        log.warning("EventSub broadcaster ignoré : jeton absent")
+                                        continue
+                                await asyncio.to_thread(self._subscribe_specs, payload["session"]["id"], specs, token)
                             elif kind == "session_reconnect":
                                 url = payload["session"]["reconnect_url"]
                                 break
@@ -558,23 +601,44 @@ class ZaelBot(commands.Bot):
                                     await self._on_notification(payload)
             except Exception as exc:
                 log.warning("EventSub interrompu : %s", type(exc).__name__)
+                url = default_url
                 await asyncio.sleep(10)
 
-    def _subscribe_all(self, session_id: str) -> None:
-        moderator = BOT_USER_ID or BROADCASTER_ID
-        specs = [
-            ("channel.follow", "2", {"broadcaster_user_id": BROADCASTER_ID, "moderator_user_id": moderator}),
-            ("channel.subscribe", "1", {"broadcaster_user_id": BROADCASTER_ID}),
-            ("channel.subscription.message", "1", {"broadcaster_user_id": BROADCASTER_ID}),
-            ("channel.subscription.gift", "1", {"broadcaster_user_id": BROADCASTER_ID}),
-            ("channel.cheer", "1", {"broadcaster_user_id": BROADCASTER_ID}),
-            ("channel.raid", "1", {"to_broadcaster_user_id": BROADCASTER_ID}),
-            ("stream.online", "1", {"broadcaster_user_id": BROADCASTER_ID}),
-            ("stream.offline", "1", {"broadcaster_user_id": BROADCASTER_ID}),
-        ]
+    def _subscribe_specs(self, session_id: str, specs: list[tuple[str, str, dict]], token: str | None) -> None:
         for event_type, version, condition in specs:
-            status = self.helix.subscribe_event(session_id, event_type, version, condition)
-            log.info("EventSub %s -> %s", event_type, status)
+            status, payload = self.helix.subscribe_event(session_id, event_type, version, condition, token)
+            if status == 202:
+                log.info("EventSub %s -> %s", event_type, status)
+            else:
+                log.warning("EventSub %s -> %s %s", event_type, status, payload.get("message") or "")
+
+    def _current_broadcaster_token(self) -> str:
+        with _BROADCASTER_REFRESH:
+            return self._refresh_broadcaster_token_sync()
+
+    def _refresh_broadcaster_token_sync(self) -> str:
+        refresh_value = os.environ.get("TWITCH_BROADCASTER_REFRESH_TOKEN", "")
+        if refresh_value:
+            try:
+                bundle = refresh_token(
+                    os.environ["TWITCH_CLIENT_ID"],
+                    os.environ["TWITCH_CLIENT_SECRET"],
+                    refresh_value,
+                )
+            except Exception as exc:
+                log.warning("Refresh du jeton broadcaster impossible : %s", type(exc).__name__)
+            else:
+                os.environ["TWITCH_BROADCASTER_ACCESS_TOKEN"] = bundle.access_token
+                os.environ["TWITCH_BROADCASTER_REFRESH_TOKEN"] = bundle.refresh_token
+                _write_env_values(
+                    {
+                        "TWITCH_BROADCASTER_ACCESS_TOKEN": bundle.access_token,
+                        "TWITCH_BROADCASTER_REFRESH_TOKEN": bundle.refresh_token,
+                    }
+                )
+                log.info("Jeton broadcaster rafraîchi")
+                return bundle.access_token
+        return os.environ.get("TWITCH_BROADCASTER_ACCESS_TOKEN", "")
 
     async def _on_notification(self, payload: dict) -> None:
         event_type = payload.get("subscription", {}).get("type", "")
@@ -696,28 +760,7 @@ class ZaelBot(commands.Bot):
             _save_deaths(self.deaths)
 
     async def _refresh_broadcaster_token(self) -> None:
-        refresh_value = os.environ.get("TWITCH_BROADCASTER_REFRESH_TOKEN", "")
-        if not refresh_value:
-            return
-        try:
-            bundle = await asyncio.to_thread(
-                refresh_token,
-                os.environ["TWITCH_CLIENT_ID"],
-                os.environ["TWITCH_CLIENT_SECRET"],
-                refresh_value,
-            )
-        except Exception as exc:
-            log.warning("Refresh du jeton broadcaster impossible : %s", exc)
-            return
-        os.environ["TWITCH_BROADCASTER_ACCESS_TOKEN"] = bundle.access_token
-        os.environ["TWITCH_BROADCASTER_REFRESH_TOKEN"] = bundle.refresh_token
-        _write_env_values(
-            {
-                "TWITCH_BROADCASTER_ACCESS_TOKEN": bundle.access_token,
-                "TWITCH_BROADCASTER_REFRESH_TOKEN": bundle.refresh_token,
-            }
-        )
-        log.info("Jeton broadcaster rafraîchi")
+        await asyncio.to_thread(self._current_broadcaster_token)
 
     async def _clip_command(self, author, now: float) -> str | None:
         if not self.cooldowns.ready("clip", author.name, now, 120, 0):

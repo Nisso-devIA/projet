@@ -21,6 +21,10 @@ class NormalizeTests(unittest.TestCase):
         for message in ("N1QU3", "n i q u e", "n.i.q.u.e", "niiique", "énculé"):
             self.assertTrue(contains_term(message, "nique") or contains_term(message, "encule"), message)
         self.assertEqual(normalize_text("enculé"), "encule")
+        for message in ("F A T", "f.a.t", "f-a-t", "F  A  T", "F i A T", "a fat cat"):
+            self.assertTrue(contains_term(message, "fat", spaced_variants=True), message)
+        for innocent in ("fatigue", "fatal", "fatality", "il a fait", "Kit", "wtf", "a", "y"):
+            self.assertFalse(contains_term(innocent, "fat"), innocent)
         for innocent in ("niquel", "nike", "poutine", "député", "computer", "réputation"):
             self.assertFalse(contains_term(innocent, "nique"), innocent)
             self.assertFalse(contains_term(innocent, "nik"), innocent)
@@ -47,6 +51,19 @@ class HateSpamPromoTests(unittest.TestCase):
     def test_false_friends_are_not_hate_or_insults(self):
         for index, text in enumerate(("c'est niquel", "j'ai des nike", "une poutine", "le député", "computer", "sa réputation", "disputer", "imputer")):
             self.assertIsNone(self.state.inspect(f"viewer{index}", text, index * 100), text)
+
+    def test_spaced_fat_and_added_insults_warn(self):
+        for index, text in enumerate(
+            ("F A T", "f.a.t", "f-a-t", "F  A  T", "F i A T", "f.i.a.t", "N i K", "F x D P", "fat", "fuck you", "gros porc", "crétin")
+        ):
+            action = self.state.inspect(f"shout{index}", text, index)
+            self.assertIsNotNone(action, text)
+            self.assertEqual(action.reason, "vulgarite", text)
+            self.assertEqual(action.action, "warn", text)
+        for index, text in enumerate(
+            ("fatigue", "fatal", "fatality", "il a fait", "Kit", "wtf", "a", "y", "Fiat", "j'ai une Fiat", "fiat lux", "a b c", "y a quoi", "G G", "W P")
+        ):
+            self.assertIsNone(self.state.inspect(f"ok{index}", text, 100 + index), text)
 
     def test_putain_family_is_vulgar(self):
         samples = ("oh putain", "putains", "pute", "des putes", "putin", "ptn", "put1", "p.u.t.e", "puuuutain")
