@@ -312,8 +312,8 @@ class Helix:
 
 
 class ZaelBot(commands.Bot):
-    def __init__(self, token: str) -> None:
-        super().__init__(token=token, prefix="!", initial_channels=[CHANNEL_LOGIN])
+    def __init__(self, token: str, loop=None) -> None:
+        super().__init__(token=token, prefix="!", initial_channels=[CHANNEL_LOGIN], loop=loop)
         self.book = _load_book()
         self.moderation = _load_moderation()
         self.timers = _load_timers()
@@ -948,7 +948,9 @@ def main() -> None:
     token = os.environ["TWITCH_BOT_ACCESS_TOKEN"]
     if token.startswith("oauth:"):
         token = token.split(":", 1)[1]
-    bot = ZaelBot(token)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    bot = ZaelBot(token, loop=loop)
     bot.run()
 
 

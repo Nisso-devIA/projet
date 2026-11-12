@@ -9,7 +9,7 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/zaeldryk/twitch-bot
 EnvironmentFile=/home/ubuntu/zaeldryk/twitch-bot/.env
-ExecStart=/usr/bin/python3 -m zaelbot
+ExecStart=/home/ubuntu/zaeldryk/twitch-bot/.venv/bin/python -m zaelbot
 Restart=always
 RestartSec=15
 
