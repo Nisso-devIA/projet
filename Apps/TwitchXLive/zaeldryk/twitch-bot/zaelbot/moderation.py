@@ -41,8 +41,9 @@ class ModerationConfig:
     spam_max_messages: int = 5
     spam_window_seconds: float = 10
     repeat_count: int = 3
-    caps_min_length: int = 12
-    caps_ratio: float = 0.7
+    caps_min_length: int = 25
+    caps_ratio: float = 0.8
+    caps_window_seconds: float = 1800
     banned_words: list[str] = field(default_factory=list)
     hate_words: list[str] = field(default_factory=lambda: list(HATE_WORDS))
     vulgar_words: list[str] = field(default_factory=lambda: list(VULGAR_WORDS))
@@ -74,10 +75,7 @@ class ModAction:
     duration: int
     strike: int
     warning: str
-
-    @property
-    def delete(self) -> bool:
-        return True
+    delete: bool = True
 
 
 class ModerationState:
@@ -85,6 +83,7 @@ class ModerationState:
         self.config = config or ModerationConfig()
         self.history: dict[str, list[tuple[float, str]]] = {}
         self.strikes: dict[str, tuple[int, float]] = {}
+        self.caps_strikes: dict[str, tuple[int, float]] = {}
         self.permits: dict[str, tuple[float, int]] = {}
         self.vulgar_strikes: dict[str, dict] = dict(strikes or {})
 
@@ -157,14 +156,69 @@ class ModerationState:
         if ordinary_free:
             return None
 
+        if self.config.caps and _too_many_caps(body, self.config.caps_min_length, self.config.caps_ratio):
+            return self._caps_action(user, now)
+
         reason = self._legacy_reason(user, body, now)
         if reason is None:
             return None
         strike = self._legacy_strike(user, now)
         return self._action(reason, "timeout", self._timeout_for(strike), strike, f"@{user}, ce message n'est pas autorisé.")
 
-    def _action(self, reason: str, action: str, duration: int, strike: int, warning: str) -> ModAction:
-        return ModAction(reason=reason, action=action, duration=duration, strike=strike, warning=warning)
+    def _action(
+        self,
+        reason: str,
+        action: str,
+        duration: int,
+        strike: int,
+        warning: str,
+        *,
+        delete: bool = True,
+    ) -> ModAction:
+        return ModAction(
+            reason=reason,
+            action=action,
+            duration=duration,
+            strike=strike,
+            warning=warning,
+            delete=delete,
+        )
+
+    def _caps_action(self, user: str, now: float) -> ModAction:
+        strike = self._caps_strike(user, now)
+        if strike <= 2:
+            return self._action(
+                "excès de majuscules",
+                "warn",
+                0,
+                strike,
+                f"@{user}, doucement sur les majuscules 😉",
+                delete=False,
+            )
+        if strike == 3:
+            return self._action(
+                "excès de majuscules",
+                "timeout",
+                60,
+                strike,
+                f"@{user}, timeout de 60 secondes pour les majuscules.",
+            )
+        return self._action(
+            "excès de majuscules",
+            "timeout",
+            300,
+            strike,
+            f"@{user}, timeout de 5 minutes pour les majuscules.",
+        )
+
+    def _caps_strike(self, user: str, now: float) -> int:
+        key = user.lower()
+        count, last = self.caps_strikes.get(key, (0, 0.0))
+        if last and now - last > self.config.caps_window_seconds:
+            count = 0
+        count += 1
+        self.caps_strikes[key] = (count, now)
+        return count
 
     def _vulgar_strike(self, user: str, now: float) -> int:
         key = user.lower()
@@ -231,8 +285,6 @@ class ModerationState:
             if self._consume_permit(user, now):
                 return None
             return "lien non autorisé"
-        if self.config.caps and _too_many_caps(text, self.config.caps_min_length, self.config.caps_ratio):
-            return "excès de majuscules"
         if self.config.spam and self._is_spam(user, text, now):
             return "spam"
         self._remember(user, text, now)

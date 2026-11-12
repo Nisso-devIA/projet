@@ -640,7 +640,7 @@ class ZaelBot(commands.Bot):
         _log_sanction(author.name, action.reason, action.action)
         if action.reason == "vulgarite":
             atomic_write(DATA / "vulgar-strikes.json", self.moderation.export_strikes())
-        if getattr(message, "id", None):
+        if action.delete and getattr(message, "id", None):
             await asyncio.to_thread(self.helix.delete_message, message.id)
         if action.warning:
             await message.channel.send(action.warning[:450])

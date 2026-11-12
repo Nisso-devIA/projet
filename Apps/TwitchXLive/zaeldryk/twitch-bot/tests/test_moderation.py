@@ -50,6 +50,33 @@ class ModerationTests(unittest.TestCase):
         repeated = self.state.inspect("repeat", "hello", 2, exempt=False)
         self.assertEqual(repeated.reason, "spam")
 
+    def test_short_shout_passes_and_caps_have_their_own_ladder(self):
+        defaults = ModerationState()
+        self.assertIsNone(defaults.inspect("viewer", "TROP FORT CE BOSS", 0))
+        shout = "POURQUOI TU CRIES COMME CA ENCORE"
+        first = defaults.inspect("viewer", shout, 0)
+        second = defaults.inspect("viewer", shout, 10)
+        third = defaults.inspect("viewer", shout, 20)
+        fourth = defaults.inspect("viewer", shout, 30)
+        self.assertEqual(first.action, "warn")
+        self.assertFalse(first.delete)
+        self.assertEqual(first.duration, 0)
+        self.assertIn("doucement sur les majuscules", first.warning)
+        self.assertEqual(second.strike, 2)
+        self.assertFalse(second.delete)
+        self.assertEqual(third.action, "timeout")
+        self.assertEqual(third.duration, 60)
+        self.assertTrue(third.delete)
+        self.assertEqual(fourth.duration, 300)
+        later = defaults.inspect("viewer", shout, 30 + 1801)
+        self.assertEqual(later.action, "warn")
+        self.assertEqual(later.strike, 1)
+        link = self.state.inspect("viewer", "https://example.com", 0, exempt=False)
+        caps = self.state.inspect("viewer", "POURQUOI TOUT CRIE ICI", 1, exempt=False)
+        self.assertEqual(link.reason, "lien non autorisé")
+        self.assertEqual(caps.reason, "excès de majuscules")
+        self.assertEqual(caps.strike, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
