@@ -71,9 +71,6 @@ VULGAR_WORDS = [
     "grosse vache",
     "gros lard",
     "boloss",
-    "abruti",
-    "débile",
-    "crétin",
     "sale merde",
     "merdeux",
     "fat",
@@ -91,12 +88,6 @@ VULGAR_WORDS = [
     "cunt",
     "motherfucker",
     "mf",
-    "idiot",
-    "stupid",
-    "moron",
-    "loser",
-    "ugly",
-    "shut up",
 ]
 
 SPAM_PHRASES = [

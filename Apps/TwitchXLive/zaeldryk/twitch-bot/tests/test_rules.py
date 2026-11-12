@@ -54,7 +54,7 @@ class HateSpamPromoTests(unittest.TestCase):
 
     def test_spaced_fat_and_added_insults_warn(self):
         for index, text in enumerate(
-            ("F A T", "f.a.t", "f-a-t", "F  A  T", "F i A T", "f.i.a.t", "N i K", "F x D P", "fat", "fuck you", "gros porc", "crétin")
+            ("F A T", "f.a.t", "f-a-t", "F  A  T", "F i A T", "f.i.a.t", "N i K", "F x D P", "fat", "fuck you", "gros porc")
         ):
             action = self.state.inspect(f"shout{index}", text, index)
             self.assertIsNotNone(action, text)
@@ -64,6 +64,30 @@ class HateSpamPromoTests(unittest.TestCase):
             ("fatigue", "fatal", "fatality", "il a fait", "Kit", "wtf", "a", "y", "Fiat", "j'ai une Fiat", "fiat lux", "a b c", "y a quoi", "G G", "W P")
         ):
             self.assertIsNone(self.state.inspect(f"ok{index}", text, 100 + index), text)
+
+    def test_light_words_are_allowed(self):
+        samples = (
+            "abruti",
+            "abrutis",
+            "débile",
+            "debile",
+            "débiles",
+            "crétin",
+            "cretin",
+            "crétins",
+            "idiot",
+            "idiots",
+            "stupid",
+            "moron",
+            "morons",
+            "loser",
+            "losers",
+            "ugly",
+            "shut up",
+            "shut-up",
+        )
+        for index, text in enumerate(samples):
+            self.assertIsNone(self.state.inspect(f"light{index}", text, 300 + index), text)
 
     def test_putain_family_is_vulgar(self):
         samples = ("oh putain", "putains", "pute", "des putes", "putin", "ptn", "put1", "p.u.t.e", "puuuutain")
