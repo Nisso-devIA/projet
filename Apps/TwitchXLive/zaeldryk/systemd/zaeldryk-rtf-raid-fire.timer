@@ -1,0 +1,12 @@
+[Unit]
+Description=Twitch raid at 23:00:00 Europe/Paris
+
+[Timer]
+# Every hour at :00. The script acts only at 23:00 Europe/Paris.
+OnCalendar=*-*-* *:00:00
+AccuracySec=1s
+Persistent=true
+Unit=zaeldryk-rtf-raid-fire.service
+
+[Install]
+WantedBy=timers.target

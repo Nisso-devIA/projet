@@ -63,7 +63,7 @@ Pour les clips, les paris et les sondages, un second jeton est nécessaire, celu
 python3 scripts/get_token.py --flow code --who broadcaster
 ```
 
-Ouvre le lien en étant connecté à zaeldryk. Les scopes demandés sont `clips:edit`, `channel:manage:predictions` et `channel:manage:polls`. Le script écrit `TWITCH_BROADCASTER_ACCESS_TOKEN` et `TWITCH_BROADCASTER_REFRESH_TOKEN` sans les afficher.
+Ouvre le lien en étant connecté à zaeldryk. Les scopes demandés sont `clips:edit`, `channel:manage:predictions`, `channel:manage:polls` et `channel:manage:raids`. Le script écrit `TWITCH_BROADCASTER_ACCESS_TOKEN` et `TWITCH_BROADCASTER_REFRESH_TOKEN` sans les afficher.
 
 Crée ensuite deux webhooks Discord, un dans 🎬-clips et un dans 📝-résumé (`1570024936565899357`). Colle les URL dans `DISCORD_CLIPS_WEBHOOK_URL` et `DISCORD_RECAP_WEBHOOK_URL`. Ne pointe pas le webhook clips vers 𝕋-twitch, ni le récap vers 📢-annonces. Les paris et sondages natifs demandent une chaîne affiliée ; sinon le bot bascule sur un vote dans le chat.
 

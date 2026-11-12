@@ -30,6 +30,7 @@ BROADCASTER_SCOPES = [
     "clips:edit",
     "channel:manage:predictions",
     "channel:manage:polls",
+    "channel:manage:raids",
 ]
 
 

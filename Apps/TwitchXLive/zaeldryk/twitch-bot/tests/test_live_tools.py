@@ -139,6 +139,7 @@ class RecapTests(unittest.TestCase):
         self.assertIn("clips:edit", BROADCASTER_SCOPES)
         self.assertIn("channel:manage:predictions", BROADCASTER_SCOPES)
         self.assertIn("channel:manage:polls", BROADCASTER_SCOPES)
+        self.assertIn("channel:manage:raids", BROADCASTER_SCOPES)
         self.assertEqual(DEFAULT_RECAP_CHANNEL_ID, "1570024936565899357")
 
 

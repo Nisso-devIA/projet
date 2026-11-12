@@ -1,0 +1,10 @@
+[Unit]
+Description=Start the Twitch raid to the RTF 23h streamer if enabled
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk
+Environment=ZAEL_ROOT=/home/ubuntu/zaeldryk
+ExecStart=/usr/bin/python3 /home/ubuntu/zaeldryk/twitch/rtf_raid.py --fire
