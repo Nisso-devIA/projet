@@ -352,11 +352,25 @@ def fire(token: str, forced_dry: bool = False) -> int:
     return 0 if status in (200, 202) else 1
 
 
+def wait_until_fire(moment: datetime) -> datetime | None:
+    """Sleep until 22:59:30 Europe/Paris if we are already in that minute."""
+    target = moment.replace(hour=22, minute=59, second=30, microsecond=0)
+    delta = (target - moment).total_seconds()
+    if 0 < delta <= 90:
+        import time
+
+        time.sleep(delta)
+        return datetime.now(PARIS)
+    if -15 <= delta <= 0:
+        return moment
+    return None
+
+
 def due(kind: str, moment: datetime) -> bool:
-    """True only at 22:50 or 23:00 Europe/Paris, whichever the timer asked for."""
+    """True only at 22:50 or 22:59 Europe/Paris, whichever the timer asked for."""
     if kind == "prepare":
         return moment.hour == 22 and moment.minute in (49, 50, 51)
-    return moment.hour == 23 and moment.minute in (0, 1)
+    return moment.hour == 22 and moment.minute == 59
 
 
 def main() -> int:
@@ -366,10 +380,11 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     now = datetime.now(PARIS)
-    if not args.dry_run:
-        if args.prepare and not due("prepare", now):
-            return 0
-        if args.fire and not due("fire", now):
+    if not args.dry_run and args.prepare and not args.fire and not due("prepare", now):
+        return 0
+    if args.fire and not args.dry_run:
+        now = wait_until_fire(now)
+        if now is None:
             return 0
     token = load_env(DISCORD_USER_ENV).get("DISCORD_USER_TOKEN", "")
     if not token:

@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 import unittest
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-from rtf_raid import parse_target, slot_line, user_on_line
+from rtf_raid import parse_target, slot_line, user_on_line, wait_until_fire
+
+PARIS = ZoneInfo("Europe/Paris")
 
 JEUDI = """07/11/26
 22H-23H🇫🇷/16H-17H🇨🇦:
@@ -38,6 +42,12 @@ class ParseTests(unittest.TestCase):
 
     def test_other_hour_is_not_the_raid_slot(self):
         self.assertIsNone(slot_line("18H-19H🇫🇷 <@1>"))
+
+    def test_fire_only_waits_near_225930(self):
+        morning = datetime(2026, 11, 12, 12, 0, tzinfo=PARIS)
+        self.assertIsNone(wait_until_fire(morning))
+        just_after = datetime(2026, 11, 12, 22, 59, 40, tzinfo=PARIS)
+        self.assertEqual(wait_until_fire(just_after), just_after)
 
 
 if __name__ == "__main__":

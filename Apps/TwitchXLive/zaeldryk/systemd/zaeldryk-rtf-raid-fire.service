@@ -1,5 +1,5 @@
 [Unit]
-Description=Start the Twitch raid to the RTF 23h streamer if enabled
+Description=Start the Twitch raid at 22:59:30 Europe/Paris if enabled
 
 [Service]
 Type=oneshot
