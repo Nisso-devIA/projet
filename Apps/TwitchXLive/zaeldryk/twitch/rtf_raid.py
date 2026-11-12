@@ -8,6 +8,7 @@ n'est fait que si RTF_RAID_ENABLED=1 et RTF_RAID_DRY_RUN=0.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -20,7 +21,6 @@ from zoneinfo import ZoneInfo
 
 PARIS = ZoneInfo("Europe/Paris")
 ROOT = Path(os.environ.get("ZAEL_ROOT", "/home/ubuntu/zaeldryk"))
-TWITCH_ENV = ROOT / "config" / "twitch.env"
 RAID_ENV = ROOT / "config" / "rtf-raid.env"
 DISCORD_USER_ENV = Path(
     os.environ.get("RTF_DISCORD_ENV", "/home/ubuntu/autobump/bump.env")
@@ -28,8 +28,12 @@ DISCORD_USER_ENV = Path(
 MAP_PATH = Path(os.environ.get("RTF_MAP", ROOT / "config" / "rtf-twitch-map.json"))
 STATE_PATH = ROOT / "state" / "rtf-raid.json"
 LOG_PATH = ROOT / "logs" / "rtf-raid.log"
-TOKEN_FILE = Path(os.environ.get("TWITCH_TOKEN_FILE", "/home/ubuntu/twitch_token.txt"))
+BOT_ENV = Path(os.environ.get("TWITCH_BOT_ENV", ROOT / "twitch-bot" / ".env"))
+TOKEN_LOCK = Path(
+    os.environ.get("TWITCH_BROADCASTER_LOCK", ROOT / "twitch-bot" / ".broadcaster-token.lock")
+)
 BROADCASTER_ID = "426411773"
+_CACHED_ACCESS = ""
 FROM_LOGIN = "zaeldryk"
 GUILD_ID = "935417890654547989"
 
@@ -172,13 +176,103 @@ def read_day_messages(token: str, channel_id: str) -> list[dict]:
     return payload
 
 
+def merge_env_text(text: str, updates: dict) -> str:
+    lines = text.splitlines()
+    seen = set()
+    out = []
+    for line in lines:
+        key = line.split("=", 1)[0] if "=" in line else ""
+        if key in updates:
+            out.append(f"{key}={updates[key]}")
+            seen.add(key)
+        else:
+            out.append(line)
+    for key, value in updates.items():
+        if key not in seen:
+            out.append(f"{key}={value}")
+    return "\n".join(out) + "\n"
+
+
+def _write_bot_env(updates: dict) -> None:
+    BOT_ENV.write_text(merge_env_text(BOT_ENV.read_text(encoding="utf-8"), updates), encoding="utf-8")
+    os.chmod(BOT_ENV, 0o600)
+
+
+def _lock_file():
+    TOKEN_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    handle = TOKEN_LOCK.open("a+")
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    return handle
+
+
+def _unlock_file(handle) -> None:
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    handle.close()
+
+
+def _plain_token(value: str) -> str:
+    token = (value or "").strip()
+    if token.startswith("oauth:"):
+        return token.split(":", 1)[1]
+    return token
+
+
 def twitch_token() -> str:
-    raw = TOKEN_FILE.read_text(encoding="utf-8").strip().replace("oauth:", "")
-    return raw.splitlines()[0].strip()
+    """Jeton d'accès broadcaster. Relit le .env du bot, sauf si ce processus vient de le rafraîchir."""
+    if _CACHED_ACCESS:
+        return _CACHED_ACCESS
+    return _plain_token(load_env(BOT_ENV).get("TWITCH_BROADCASTER_ACCESS_TOKEN", ""))
+
+
+def refresh_broadcaster() -> str:
+    """Relit le .env sous le verrou partagé avec le bot, puis rafraîchit une fois."""
+    global _CACHED_ACCESS
+    handle = _lock_file()
+    try:
+        values = load_env(BOT_ENV)
+        current = _plain_token(values.get("TWITCH_BROADCASTER_ACCESS_TOKEN", ""))
+        refresh_value = values.get("TWITCH_BROADCASTER_REFRESH_TOKEN", "")
+        cid = values.get("TWITCH_CLIENT_ID", "")
+        secret = values.get("TWITCH_CLIENT_SECRET", "")
+        if not refresh_value or not cid or not secret:
+            _CACHED_ACCESS = current
+            return current
+        form = urllib.parse.urlencode(
+            {
+                "client_id": cid,
+                "client_secret": secret,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_value,
+            }
+        ).encode()
+        request = urllib.request.Request("https://id.twitch.tv/oauth2/token", data=form, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                payload = json.loads(response.read().decode())
+        except urllib.error.HTTPError as exc:
+            log(f"refresh broadcaster HTTP {exc.code}")
+            _CACHED_ACCESS = current
+            return current
+        access = _plain_token(payload.get("access_token") or "")
+        rotated = payload.get("refresh_token") or ""
+        if not access or not rotated:
+            log("refresh broadcaster incomplet")
+            _CACHED_ACCESS = current
+            return current
+        _write_bot_env(
+            {
+                "TWITCH_BROADCASTER_ACCESS_TOKEN": access,
+                "TWITCH_BROADCASTER_REFRESH_TOKEN": rotated,
+            }
+        )
+        _CACHED_ACCESS = access
+        return access
+    finally:
+        _unlock_file(handle)
 
 
 def client_id() -> str:
-    return load_env(TWITCH_ENV).get("TWITCH_CLIENT_ID", "")
+    return load_env(BOT_ENV).get("TWITCH_CLIENT_ID", "")
 
 
 def validate_token() -> dict:
@@ -321,6 +415,7 @@ def start_raid(to_id: str) -> tuple[int, str]:
 
 
 def fire(token: str, forced_dry: bool = False) -> int:
+    refresh_broadcaster()
     state_path_data = prepare(token)
     login = state_path_data.get("twitch_login")
     if not login:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import fcntl
 import json
 import logging
 import os
@@ -49,6 +50,7 @@ BOT_USER_ID = os.environ.get("TWITCH_BOT_USER_ID", "")
 
 log = logging.getLogger("zaelbot")
 _BROADCASTER_REFRESH = threading.Lock()
+_BROADCASTER_LOCK_PATH = ROOT / ".broadcaster-token.lock"
 
 
 def _setup_logging() -> None:
@@ -617,28 +619,36 @@ class ZaelBot(commands.Bot):
             return self._refresh_broadcaster_token_sync()
 
     def _refresh_broadcaster_token_sync(self) -> str:
-        refresh_value = os.environ.get("TWITCH_BROADCASTER_REFRESH_TOKEN", "")
-        if refresh_value:
-            try:
-                bundle = refresh_token(
-                    os.environ["TWITCH_CLIENT_ID"],
-                    os.environ["TWITCH_CLIENT_SECRET"],
-                    refresh_value,
-                )
-            except Exception as exc:
-                log.warning("Refresh du jeton broadcaster impossible : %s", type(exc).__name__)
-            else:
-                os.environ["TWITCH_BROADCASTER_ACCESS_TOKEN"] = bundle.access_token
-                os.environ["TWITCH_BROADCASTER_REFRESH_TOKEN"] = bundle.refresh_token
-                _write_env_values(
-                    {
-                        "TWITCH_BROADCASTER_ACCESS_TOKEN": bundle.access_token,
-                        "TWITCH_BROADCASTER_REFRESH_TOKEN": bundle.refresh_token,
-                    }
-                )
-                log.info("Jeton broadcaster rafraîchi")
-                return bundle.access_token
-        return os.environ.get("TWITCH_BROADCASTER_ACCESS_TOKEN", "")
+        handle = _env_lock()
+        try:
+            values = _read_env_file()
+            refresh_value = values.get("TWITCH_BROADCASTER_REFRESH_TOKEN", "")
+            current = values.get("TWITCH_BROADCASTER_ACCESS_TOKEN", "")
+            if refresh_value:
+                try:
+                    bundle = refresh_token(
+                        values.get("TWITCH_CLIENT_ID") or os.environ["TWITCH_CLIENT_ID"],
+                        values.get("TWITCH_CLIENT_SECRET") or os.environ["TWITCH_CLIENT_SECRET"],
+                        refresh_value,
+                    )
+                except Exception as exc:
+                    log.warning("Refresh du jeton broadcaster impossible : %s", type(exc).__name__)
+                else:
+                    os.environ["TWITCH_BROADCASTER_ACCESS_TOKEN"] = bundle.access_token
+                    os.environ["TWITCH_BROADCASTER_REFRESH_TOKEN"] = bundle.refresh_token
+                    _apply_env_values(
+                        {
+                            "TWITCH_BROADCASTER_ACCESS_TOKEN": bundle.access_token,
+                            "TWITCH_BROADCASTER_REFRESH_TOKEN": bundle.refresh_token,
+                        }
+                    )
+                    log.info("Jeton broadcaster rafraîchi")
+                    return bundle.access_token
+            if current:
+                os.environ["TWITCH_BROADCASTER_ACCESS_TOKEN"] = current
+            return current
+        finally:
+            _env_unlock(handle)
 
     async def _on_notification(self, payload: dict) -> None:
         event_type = payload.get("subscription", {}).get("type", "")
@@ -954,7 +964,33 @@ def _write_env_tokens(access_token: str, refresh_token_value: str) -> None:
     )
 
 
-def _write_env_values(updates: dict) -> None:
+def _env_lock():
+    _BROADCASTER_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    handle = _BROADCASTER_LOCK_PATH.open("a+")
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    return handle
+
+
+def _env_unlock(handle) -> None:
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    handle.close()
+
+
+def _read_env_file() -> dict:
+    path = ROOT / ".env"
+    values = {}
+    if not path.exists():
+        return values
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def _apply_env_values(updates: dict) -> None:
     path = ROOT / ".env"
     if not path.exists():
         return
@@ -973,8 +1009,17 @@ def _write_env_values(updates: dict) -> None:
             out.append(f"{key}={value}")
     temporary = path.with_suffix(".env.tmp")
     temporary.write_text("\n".join(out) + "\n", encoding="utf-8")
+    os.chmod(temporary, 0o600)
     temporary.replace(path)
     os.chmod(path, 0o600)
+
+
+def _write_env_values(updates: dict) -> None:
+    handle = _env_lock()
+    try:
+        _apply_env_values(updates)
+    finally:
+        _env_unlock(handle)
 
 
 def missing_settings() -> list[str]:

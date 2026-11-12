@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from rtf_raid import parse_target, slot_line, user_on_line, wait_until_fire
+from rtf_raid import merge_env_text, parse_target, slot_line, user_on_line, wait_until_fire
 
 PARIS = ZoneInfo("Europe/Paris")
 
@@ -42,6 +42,21 @@ class ParseTests(unittest.TestCase):
 
     def test_other_hour_is_not_the_raid_slot(self):
         self.assertIsNone(slot_line("18H-19H🇫🇷 <@1>"))
+
+    def test_env_merge_replaces_only_the_named_keys(self):
+        original = "TWITCH_CLIENT_ID=app\nTWITCH_BROADCASTER_ACCESS_TOKEN=old-access\nOTHER=keep\n"
+        merged = merge_env_text(
+            original,
+            {
+                "TWITCH_BROADCASTER_ACCESS_TOKEN": "new-access",
+                "TWITCH_BROADCASTER_REFRESH_TOKEN": "new-refresh",
+            },
+        )
+        self.assertIn("TWITCH_CLIENT_ID=app\n", merged)
+        self.assertIn("OTHER=keep\n", merged)
+        self.assertIn("TWITCH_BROADCASTER_ACCESS_TOKEN=new-access\n", merged)
+        self.assertIn("TWITCH_BROADCASTER_REFRESH_TOKEN=new-refresh\n", merged)
+        self.assertNotIn("old-access", merged)
 
     def test_fire_only_waits_near_225930(self):
         morning = datetime(2026, 11, 12, 12, 0, tzinfo=PARIS)
