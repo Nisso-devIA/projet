@@ -150,6 +150,9 @@ maybe_x_delete() {
 }
 
 maybe_discord_reminder() {
+  if [[ "${DISCORD_REMINDER_ENABLED:-1}" != "1" ]]; then
+    return 0
+  fi
   local now last
   now=$(date +%s)
   last=$(cat "$ZAEL_STATE/last_discord_reminder.txt" 2>/dev/null || echo 0)

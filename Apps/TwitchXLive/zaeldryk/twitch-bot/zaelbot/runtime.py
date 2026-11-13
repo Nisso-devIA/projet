@@ -106,6 +106,10 @@ def _load_timers() -> TimerScheduler:
     ensure_copy(ROOT / "timers.example.json", DATA / "timers.json")
     raw = read_json(DATA / "timers.json", [])
     timers = [Timer.from_dict(item) for item in raw] if isinstance(raw, list) else []
+    # A restart must not send the reminders at once. The interval starts now.
+    started = _now()
+    for timer in timers:
+        timer.last_sent = started
     return TimerScheduler(timers)
 
 
