@@ -265,9 +265,11 @@
       if (kind === "followers") return "sounds/hey-listen.wav";
       if (kind === "subs") {
         const plan = String(row.plan || "");
-        if (row.prime || plan === "1000" || plan === "2000") return "sounds/rupee-blue.wav";
+        if (row.gift) return "sounds/gift.wav";
+        if (row.prime) return "sounds/rupee-blue.wav";
+        if (subInfo(row).months > 1) return "sounds/resub.wav";
         if (plan === "3000") return "sounds/rupee-red.wav";
-        return "sounds/rupee-blue.wav";
+        return "sounds/sub.wav";
       }
       return rupeeFile(eurosFromBits(row.bits));
     }
