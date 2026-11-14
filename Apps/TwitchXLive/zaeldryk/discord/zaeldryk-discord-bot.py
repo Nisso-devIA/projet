@@ -604,7 +604,7 @@ class AnnonceConfirmView(discord.ui.View):
             text = f"@everyone\n\n{text}"
         msg = await channel.send(
             content=text,
-            embeds=self.embeds or None,
+            embeds=self.embeds or [],
             allowed_mentions=discord.AllowedMentions(everyone=self.ping_everyone),
         )
         await self._disable(interaction, f"✅ Publié : {msg.jump_url}")
@@ -660,7 +660,7 @@ class AnnonceModal(discord.ui.Modal, title="Annonce (générée par Grok)"):
         )
         await interaction.followup.send(
             "**Aperçu** — Publier ou Annuler\n\n" + preview,
-            embeds=generated["embeds"][:1] or None,
+            embeds=generated["embeds"][:1] or [],
             view=view,
             ephemeral=True,
         )
