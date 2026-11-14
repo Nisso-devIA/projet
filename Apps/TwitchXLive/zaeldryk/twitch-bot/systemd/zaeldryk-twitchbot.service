@@ -1,0 +1,17 @@
+[Unit]
+Description=Bot Twitch Zaeldryk (chat, modération, EventSub)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk/twitch-bot
+EnvironmentFile=/home/ubuntu/zaeldryk/twitch-bot/.env
+ExecStart=/home/ubuntu/zaeldryk/twitch-bot/.venv/bin/python -m zaelbot
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

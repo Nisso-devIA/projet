@@ -12,12 +12,6 @@
 
   "showTyping": false,
 
-  "stealthChats": ["33665618712"],
-
-  "notifyOwnerOnRead": true,
-
-  "notifyOwnerOnReadChats": [],
-
   "transcribeVoice": false,
 
   "transcribeMode": "command",
@@ -38,7 +32,7 @@
 
   "liveAnnounce": {
 
-    "enabled": true,
+    "enabled": false,
 
     "modeFile": "/home/ubuntu/zaeldryk/state/mode.txt",
 

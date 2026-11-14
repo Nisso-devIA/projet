@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "check": "node tools/check-bot.js",
+    "test": "node --test test/*.test.js",
     "watchdog": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/watchdog.ps1 -Restart"
   },
   "engines": {
@@ -15,7 +16,7 @@
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
-    "@whiskeysockets/baileys": "^6.7.18",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "@xenova/transformers": "^2.17.2",
     "dotenv": "^16.4.7",
     "ffmpeg-static": "^5.3.0",

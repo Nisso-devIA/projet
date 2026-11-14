@@ -41,7 +41,15 @@ def main():
     try:
         client.delete_tweet(tweet_id)
         print(f"Supprimé : {tweet_id}")
-    finally:
+        clear_ids = True
+    except tweepy.TweepyException as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 404:
+            print(f"déjà absent : {tweet_id}")
+            clear_ids = True
+        else:
+            raise
+    if clear_ids:
         for p in (POST_ID_FILE, LEGACY, path):
             try:
                 os.remove(p)

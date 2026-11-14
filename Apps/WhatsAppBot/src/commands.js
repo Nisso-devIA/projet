@@ -1,6 +1,5 @@
 import { config, isOwner } from "./config.js";
 import { displayPhone, isGroupJid } from "./text.js";
-import { formatLastReads } from "./read-receipts.js";
 import { postTestStory } from "./status-post.js";
 import { formatStatusViews } from "./status-views.js";
 import { sendChatReply } from "./chat-send.js";
@@ -16,11 +15,9 @@ function helpText() {
     `• ${config.prefix}heure — date et heure actuelles`,
     `• ${config.prefix}echo <texte> — répéter un message`,
     `• ${config.prefix}transcrire — transcrire un vocal (répondre au message)`,
-    `• ${config.prefix}lectures — voir qui a lu tes messages (mode discret)`,
     `• ${config.prefix}story — tester une story WhatsApp`,
     `• ${config.prefix}vues — qui a ouvert le dernier statut`,
     "",
-    "Conversations *stealth* : pas de bleu pour l'autre, mais alerte quand il lit tes messages.",
     "Stories live Twitch : vrai live seulement (titre sans offline) → story début/fin.",
     "Le bot ne contacte jamais tes contacts en message privé de sa propre initiative.",
     "Utilise *!transcrire* en réponse à un vocal.",
@@ -60,15 +57,6 @@ const commands = {
     return args;
   },
 
-  lectures: ({ jid }) => {
-    if (!isOwner(jid)) return "Réservé au propriétaire.";
-    return formatLastReads();
-  },
-  lu: ({ jid }) => {
-    if (!isOwner(jid)) return "Réservé au propriétaire.";
-    return formatLastReads();
-  },
-
   vues: ({ jid, fromMe }) => {
     if (!isOwner(jid) && !fromMe) return "Réservé au propriétaire.";
     return formatStatusViews();
@@ -96,7 +84,7 @@ const commands = {
           "⚠️ Peu de contacts synchronisés — laisse le bot connecté quelques minutes puis réessaie."
         );
       }
-      if (info.delivery === "PENDING" || info.delivery === 0) {
+      if (typeof info.delivery === "number" ? info.delivery < 2 : info.delivery === "PENDING") {
         lines.push(
           "⚠️ Bug connu Baileys : la story peut rester invisible même si le bot dit OK."
         );

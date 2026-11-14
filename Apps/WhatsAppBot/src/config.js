@@ -13,9 +13,6 @@ const defaults = {
   ignoreStatus: true,
   markAsRead: false,
   showTyping: false,
-  stealthChats: [],
-  notifyOwnerOnRead: true,
-  notifyOwnerOnReadChats: [],
   transcribeVoice: false,
   transcribeMode: "command",
   transcribeAllowList: [],
@@ -68,8 +65,6 @@ export const config = {
   ...defaults,
   ...fileConfig,
   transcribeAllowList: normalizeAllowList(fileConfig.transcribeAllowList),
-  stealthChats: normalizeAllowList(fileConfig.stealthChats),
-  notifyOwnerOnReadChats: normalizeAllowList(fileConfig.notifyOwnerOnReadChats),
   liveAnnounce: {
     ...defaults.liveAnnounce,
     ...(fileConfig.liveAnnounce || {}),

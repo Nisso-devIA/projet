@@ -109,9 +109,18 @@ maybe_x_post() {
   if [[ -f "$X_POST_ID_FILE" ]]; then
     return 0
   fi
+  local stream_id started_at
+  stream_id=$(echo "$STREAM_JSON" | jq -r '.data[0].id // ""')
+  started_at=$(echo "$STREAM_JSON" | jq -r '.data[0].started_at // ""')
+  local x_python
+  x_python="/usr/bin/python3"
+  if [[ -x "$ZAEL_ROOT/venv/bin/python3" ]]; then
+    x_python="$ZAEL_ROOT/venv/bin/python3"
+  fi
   zael_log "$LOG" "X post → $title"
   X_CONFIG_PATH="$X_CONFIG" X_POST_ID_FILE="$X_POST_ID_FILE" \
-    /usr/bin/python3 "$X_POST_SCRIPT" "$title" >>"$LOG" 2>&1 || \
+    X_STREAM_ID="$stream_id" X_STARTED_AT="$started_at" \
+    "$x_python" "$X_POST_SCRIPT" "$title" >>"$LOG" 2>&1 || \
     zael_log "$LOG" "X post failed (credits/auth?) — ignored"
   ensure_x_id_link
 }
@@ -128,14 +137,22 @@ maybe_x_delete() {
   if [[ ! -f "$X_POST_ID_FILE" && -f "$COMPAT_X_ID" ]]; then
     cp -a "$COMPAT_X_ID" "$X_POST_ID_FILE"
   fi
+  local x_python
+  x_python="/usr/bin/python3"
+  if [[ -x "$ZAEL_ROOT/venv/bin/python3" ]]; then
+    x_python="$ZAEL_ROOT/venv/bin/python3"
+  fi
   zael_log "$LOG" "X delete"
   X_CONFIG_PATH="$X_CONFIG" X_POST_ID_FILE="$X_POST_ID_FILE" \
-    /usr/bin/python3 "$X_DELETE_SCRIPT" >>"$LOG" 2>&1 || \
+    "$x_python" "$X_DELETE_SCRIPT" >>"$LOG" 2>&1 || \
     zael_log "$LOG" "X delete failed — clearing local id"
   rm -f "$X_POST_ID_FILE" "$COMPAT_X_ID"
 }
 
 maybe_discord_reminder() {
+  if [[ "${DISCORD_REMINDER_ENABLED:-1}" != "1" ]]; then
+    return 0
+  fi
   local now last
   now=$(date +%s)
   last=$(cat "$ZAEL_STATE/last_discord_reminder.txt" 2>/dev/null || echo 0)

@@ -1,0 +1,38 @@
+{
+  "discord": {
+    "response": "Le Discord du Royaume : https://discord.gg/3vH2u7pme5",
+    "permission": "everyone",
+    "cooldown": 15,
+    "user_cooldown": 30,
+    "enabled": true
+  },
+  "tiktok": {
+    "response": "TikTok : https://www.tiktok.com/@zaeldryk",
+    "permission": "everyone",
+    "cooldown": 15,
+    "user_cooldown": 30,
+    "enabled": true
+  },
+  "planning": {
+    "response": "Le planning des lives est dans le Discord, salon planning. Chaîne : https://twitch.tv/zaeldryk",
+    "permission": "everyone",
+    "cooldown": 15,
+    "user_cooldown": 30,
+    "enabled": true
+  },
+  "don": {
+    "response": "💚 Envie de soutenir la chaîne ? Chaque don aide à améliorer le setup et à organiser des giveaways sur le Discord du royaume 🐺 → https://ko-fi.com/zaeldryk Merci du fond du cœur, la meute ! ⚔️",
+    "permission": "everyone",
+    "cooldown": 15,
+    "user_cooldown": 30,
+    "enabled": true,
+    "aliases": ["tip", "soutien"]
+  },
+  "commandes": {
+    "response": "",
+    "permission": "everyone",
+    "cooldown": 10,
+    "user_cooldown": 20,
+    "enabled": true
+  }
+}

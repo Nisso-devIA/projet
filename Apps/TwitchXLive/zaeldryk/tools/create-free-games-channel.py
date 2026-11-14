@@ -8,6 +8,17 @@ import urllib.error
 GUILD_ID = 867426693286461490
 CHANNEL_NAME = "🎁-jeux-gratuits"
 TOPIC = "Jeux gratuits Epic, PlayStation, Xbox, Steam, GOG…"
+VIEW = 1 << 10
+SEND = 1 << 11
+MANAGE_MESSAGES = 1 << 13
+HISTORY = 1 << 16
+# Same overwrites as #🔔-actualités / #📢-annonces: hidden until 🐺 Disciple.
+ROLE_OVERWRITES = {
+    "🐺 Disciple": (VIEW | HISTORY, 0),
+    "⚔️ Sentinelle": (VIEW | SEND | MANAGE_MESSAGES, 0),
+    "👑 Archonte de Zaeldryk": (VIEW | SEND, 0),
+    "🌑 Ombre": (VIEW | SEND, 0),
+}
 
 env = Path("/home/ubuntu/zaeldryk/config/discord.env")
 token = None
@@ -38,6 +49,29 @@ def api(method, path, body=None):
         return resp.status, json.loads(raw) if raw else None
 
 
+def member_overwrites(roles):
+    by_name = {role["name"]: role["id"] for role in roles}
+    overwrites = [
+        {"id": str(GUILD_ID), "type": 0, "allow": "0", "deny": str(VIEW)},
+    ]
+    for name, (allow, deny) in ROLE_OVERWRITES.items():
+        role_id = by_name.get(name)
+        if not role_id:
+            print("missing role", name)
+            continue
+        overwrites.append(
+            {
+                "id": str(role_id),
+                "type": 0,
+                "allow": str(allow),
+                "deny": str(deny),
+            }
+        )
+    return overwrites
+
+
+_, roles = api("GET", f"/guilds/{GUILD_ID}/roles")
+overwrites = member_overwrites(roles)
 _, channels = api("GET", f"/guilds/{GUILD_ID}/channels")
 existing = next(
     (c for c in channels if c.get("type") == 0 and c.get("name") == CHANNEL_NAME),
@@ -58,13 +92,22 @@ if not parent_id:
 
 if existing:
     ch_id = existing["id"]
-    body = {"name": CHANNEL_NAME, "topic": TOPIC}
+    body = {
+        "name": CHANNEL_NAME,
+        "topic": TOPIC,
+        "permission_overwrites": overwrites,
+    }
     if parent_id and not existing.get("parent_id"):
         body["parent_id"] = parent_id
     api("PATCH", f"/channels/{ch_id}", body)
     print("reuse", ch_id)
 else:
-    body = {"name": CHANNEL_NAME, "type": 0, "topic": TOPIC}
+    body = {
+        "name": CHANNEL_NAME,
+        "type": 0,
+        "topic": TOPIC,
+        "permission_overwrites": overwrites,
+    }
     if parent_id:
         body["parent_id"] = parent_id
     _, created = api("POST", f"/guilds/{GUILD_ID}/channels", body)
