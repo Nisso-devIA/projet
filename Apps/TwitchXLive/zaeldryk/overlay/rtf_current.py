@@ -8,7 +8,10 @@ from zoneinfo import ZoneInfo
 
 PARIS = ZoneInfo("Europe/Paris")
 SELF_LOGIN = "zaeldryk"
-SLOT_RE = re.compile(r"(\d{1,2})\s*h\s*[-–]\s*(\d{1,2})\s*h", re.IGNORECASE)
+SLOT_RE = re.compile(
+    r"(\d{1,2})\s*h\s*(\d{1,2})?\s*[-–]\s*(\d{1,2})\s*h\s*(\d{1,2})?",
+    re.IGNORECASE,
+)
 MENTION_RE = re.compile(r"<@!?(\d+)>")
 TWITCH_RE = re.compile(r"twitch\.tv/([A-Za-z0-9_]+)", re.IGNORECASE)
 NAME_RE = re.compile(r"raid avec\s+([A-Za-z0-9_]+)", re.IGNORECASE)
@@ -33,15 +36,23 @@ def _usable(login: str) -> str:
     return name
 
 
-def is_grid(content: str) -> bool:
-    return len(SLOT_RE.findall(content or "")) >= 3
+def _minutes(value: str | None) -> int:
+    if not value:
+        return 0
+    return min(int(value), 59)
 
 
-def _line_slot(line: str) -> tuple[int, str] | None:
+def _line_slot(line: str) -> tuple[int, int, int, int, str] | None:
     match = SLOT_RE.search(line or "")
     if not match:
         return None
-    return int(match.group(1)) % 24, line
+    return (
+        int(match.group(1)) % 24,
+        _minutes(match.group(2)),
+        int(match.group(3)) % 24,
+        _minutes(match.group(4)),
+        line,
+    )
 
 
 def _person(line: str, message: dict, mapping: dict[str, str]) -> str:
@@ -60,34 +71,84 @@ def _person(line: str, message: dict, mapping: dict[str, str]) -> str:
     return ""
 
 
-def planning_slots(messages: list[dict], mapping: dict[str, str]) -> dict[int, dict]:
-    """Heure française de début -> {login, msg_id}. Les corrections après la grille gagnent."""
+def planning_slots(messages: list[dict], mapping: dict[str, str]) -> list[dict]:
+    """Créneaux français, un message par streamer ou une grille. Le plus récent gagne."""
     ordered = sorted(messages, key=lambda item: item.get("timestamp") or "")
-    grids = [item for item in ordered if is_grid(item.get("content") or "")]
-    if not grids:
-        return {}
-    grid = grids[-1]
-    slots: dict[int, dict] = {}
-    for line in (grid.get("content") or "").splitlines():
-        parsed = _line_slot(line)
-        if parsed is None:
-            continue
-        hour, text = parsed
-        slots[hour] = {"login": _person(text, grid, mapping), "msg_id": str(grid.get("id") or "")}
+    slots: dict[tuple[int, int, int, int], dict] = {}
     for item in ordered:
-        if (item.get("timestamp") or "") <= (grid.get("timestamp") or ""):
-            continue
         content = item.get("content") or ""
         for line in content.splitlines():
             parsed = _line_slot(line)
             if parsed is None:
                 continue
-            hour, text = parsed
+            start_h, start_m, end_h, end_m, text = parsed
+            key = (start_h, start_m, end_h, end_m)
             if "annulation" in content.lower() or "annulation" in text.lower():
-                slots[hour] = {"login": "", "msg_id": str(item.get("id") or "")}
+                slots[key] = {
+                    "login": "",
+                    "start_h": start_h,
+                    "start_m": start_m,
+                    "end_h": end_h,
+                    "end_m": end_m,
+                    "msg_id": str(item.get("id") or ""),
+                }
                 continue
-            slots[hour] = {"login": _person(text, item, mapping), "msg_id": str(item.get("id") or "")}
-    return slots
+            slots[key] = {
+                "login": _person(text, item, mapping),
+                "start_h": start_h,
+                "start_m": start_m,
+                "end_h": end_h,
+                "end_m": end_m,
+                "msg_id": str(item.get("id") or ""),
+            }
+    return list(slots.values())
+
+
+def _window(moment: datetime, slot: dict) -> tuple[datetime, datetime]:
+    start = moment.replace(hour=slot["start_h"], minute=slot["start_m"], second=0, microsecond=0)
+    end = moment.replace(hour=slot["end_h"], minute=slot["end_m"], second=0, microsecond=0)
+    if (slot["end_h"], slot["end_m"]) <= (slot["start_h"], slot["start_m"]):
+        if (moment.hour, moment.minute) < (slot["end_h"], slot["end_m"]):
+            start -= timedelta(days=1)
+        else:
+            end += timedelta(days=1)
+    return start, end
+
+
+def _occurrences(moment: datetime, slot: dict) -> list[tuple[datetime, datetime]]:
+    start, end = _window(moment, slot)
+    return [
+        (start - timedelta(days=1), end - timedelta(days=1)),
+        (start, end),
+        (start + timedelta(days=1), end + timedelta(days=1)),
+    ]
+
+
+def _current_and_next(moment: datetime, slots: list[dict]) -> tuple[dict | None, datetime | None, dict | None, datetime | None]:
+    current = None
+    current_end = None
+    for slot in slots:
+        if not slot.get("login"):
+            continue
+        for start, end in _occurrences(moment, slot):
+            if start <= moment < end and (current is None or start >= current[0]):
+                current = (start, end, slot)
+    if current:
+        current_end = current[1]
+    upcoming = None
+    for slot in slots:
+        if not slot.get("login"):
+            continue
+        for start, end in _occurrences(moment, slot):
+            if current_end is not None and start < current_end:
+                continue
+            if current_end is None and start <= moment:
+                continue
+            if upcoming is None or start < upcoming[0]:
+                upcoming = (start, end, slot)
+    if current is None:
+        return None, None, (upcoming[2] if upcoming else None), (upcoming[0] if upcoming else None)
+    return current[2], current[0], (upcoming[2] if upcoming else None), (upcoming[0] if upcoming else None)
 
 
 def announcement_target(messages: list[dict]) -> dict:
@@ -110,49 +171,45 @@ def announcement_target(messages: list[dict]) -> dict:
     return {"login": "", "msg_id": "", "since": ""}
 
 
-def slot_start(moment: datetime, hour: int) -> datetime:
-    start = moment.replace(hour=0, minute=0, second=0, microsecond=0)
-    if hour < moment.hour:
-        start += timedelta(days=1)
-    return start.replace(hour=hour)
-
-
 def build_snapshot(
     *,
     moment: datetime,
-    slots: dict[int, dict],
+    slots: list[dict],
     announcement: dict,
     live: set[str],
     zaeldryk_live: bool,
 ) -> dict:
-    current_hour = moment.hour
-    next_hour = (current_hour + 1) % 24
-    current = slots.get(current_hour) or {"login": "", "msg_id": ""}
-    nxt = slots.get(next_hour) or {"login": "", "msg_id": ""}
-    current_login = _usable(current.get("login") or "")
-    next_login = _usable(nxt.get("login") or "")
+    current, current_start, nxt, next_start = _current_and_next(moment, slots)
+    current_login = _usable((current or {}).get("login") or "")
+    next_login = _usable((nxt or {}).get("login") or "")
     announced = _usable(announcement.get("login") or "")
-    current_live = current_login in live
-    if current_login and current_live:
-        login, source, since, msg_id = current_login, "planning", slot_start(moment, current_hour).isoformat(), current.get("msg_id") or ""
-    elif announced and announced in live:
+    current_live = bool(current_login) and current_login in live
+    announced_live = bool(announced) and announced in live
+    same = bool(current_login) and current_login == announced
+    if same and (current_live or announced_live):
+        login, source, since, msg_id = current_login, "planning", (current_start.isoformat() if current_start else ""), (current or {}).get("msg_id") or ""
+    elif current_login and current_live:
+        login, source, since, msg_id = current_login, "planning", (current_start.isoformat() if current_start else ""), (current or {}).get("msg_id") or ""
+    elif announced and announced_live:
         login, source, since, msg_id = announced, "announcement", announcement.get("since") or "", announcement.get("msg_id") or ""
     else:
-        login, source, since, msg_id = "", "", "", announcement.get("msg_id") or current.get("msg_id") or ""
+        login, source, since, msg_id = "", "", "", announcement.get("msg_id") or (current or {}).get("msg_id") or ""
     return {
         "login": login,
         "since": since or None,
         "source": source,
         "source_msg_id": msg_id,
         "zaeldryk_live": bool(zaeldryk_live),
+        "match": same,
         "current_slot": {
             "login": current_login,
-            "start": slot_start(moment, current_hour).isoformat(),
+            "start": current_start.isoformat() if current_start else None,
             "live": current_live,
         },
         "next_slot": {
             "login": next_login,
-            "start": slot_start(moment, next_hour).isoformat(),
+            "start": next_start.isoformat() if next_start else None,
             "live": bool(next_login) and next_login in live,
         },
+        "announcement_login": announced,
     }

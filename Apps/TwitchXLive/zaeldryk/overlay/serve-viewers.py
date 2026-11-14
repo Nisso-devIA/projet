@@ -376,8 +376,10 @@ _rtf_body = json.dumps(
         "source": "",
         "source_msg_id": "",
         "zaeldryk_live": False,
+        "match": False,
         "current_slot": {"login": "", "start": None, "live": False},
         "next_slot": {"login": "", "start": None, "live": False},
+        "announcement_login": "",
     }
 ).encode()
 _rtf_lock = threading.Lock()
@@ -437,9 +439,10 @@ def refresh_rtf() -> None:
         mapping = {str(key): str(value).lower() for key, value in json.loads(mapping_path.read_text()).items()}
     slots = planning_slots(_discord_messages(channel_id), mapping)
     announcement = announcement_target(_discord_messages(RAID_CHANNEL))
-    current = (slots.get(moment.hour) or {}).get("login") or ""
-    nxt = (slots.get((moment.hour + 1) % 24) or {}).get("login") or ""
-    live = _live_logins([current, nxt, announcement.get("login") or "", SELF_LOGIN])
+    names = [slot.get("login") or "" for slot in slots]
+    names.append(announcement.get("login") or "")
+    names.append(SELF_LOGIN)
+    live = _live_logins(names)
     snapshot = build_snapshot(
         moment=moment,
         slots=slots,
