@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
+import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 
 from zaelbot.events import format_uptime
 
@@ -135,15 +139,84 @@ def post_webhook(url: str, content: str) -> int:
     """Envoie un message. L'URL n'est pas journalisée : elle contient le secret du webhook."""
     if not url:
         return 0
+    status, _message_id = _post_json(url, content, headers={"User-Agent": "zaelbot"})
+    return status if status in (200, 201, 204) else 0
+
+
+def discord_bot_token() -> str:
+    token = os.environ.get("DISCORD_BOT_TOKEN", "").strip().strip('"').strip("'")
+    if token.lower().startswith("bot "):
+        token = token[4:].strip()
+    if token:
+        return token
+    path = Path(os.environ.get("DISCORD_ENV_PATH", "/home/ubuntu/zaeldryk/config/discord.env"))
+    if not path.is_file():
+        return ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("DISCORD_BOT_TOKEN="):
+            continue
+        token = line.split("=", 1)[1].strip().strip('"').strip("'")
+        if token.lower().startswith("bot "):
+            token = token[4:].strip()
+        return token
+    return ""
+
+
+def post_channel(token: str, channel_id: str, content: str) -> tuple[int, str]:
+    """Poste avec le bot Discord. Ne journalise pas le jeton."""
+    if not token or not channel_id:
+        return 0, ""
+    return _post_json(
+        f"https://discord.com/api/v10/channels/{channel_id}/messages",
+        content,
+        headers={"Authorization": "Bot " + token, "User-Agent": "zaelbot"},
+    )
+
+
+def deliver_recap(
+    content: str,
+    *,
+    webhook_url: str = "",
+    bot_token: str = "",
+    channel_id: str = "",
+    pauses: tuple[float, ...] = (0, 2, 5),
+) -> tuple[int, str]:
+    """Réessaie quelques fois. Retourne (statut, id du message) et (0, '') si rien n'est parti."""
+    use_webhook = bool(webhook_url)
+    last_status = 0
+    for attempt, pause in enumerate(pauses, start=1):
+        if pause:
+            time.sleep(pause)
+        if use_webhook:
+            last_status, message_id = _post_json(webhook_url, content, headers={"User-Agent": "zaelbot"})
+        else:
+            last_status, message_id = post_channel(bot_token, channel_id, content)
+        if last_status in (200, 201, 204):
+            return last_status, message_id
+    return last_status, ""
+
+
+def _post_json(url: str, content: str, headers: dict) -> tuple[int, str]:
+    if not url:
+        return 0, ""
     data = json.dumps(discord_payload(content)).encode()
     request = urllib.request.Request(
         url,
         data=data,
         method="POST",
-        headers={"Content-Type": "application/json", "User-Agent": "zaelbot"},
+        headers={"Content-Type": "application/json", **headers},
     )
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
-            return response.status
+            raw = response.read()
+            message_id = ""
+            if raw:
+                try:
+                    message_id = str(json.loads(raw.decode()).get("id") or "")
+                except (json.JSONDecodeError, UnicodeError):
+                    message_id = ""
+            return response.status, message_id
+    except urllib.error.HTTPError as exc:
+        return exc.code, ""
     except Exception:
-        return 0
+        return 0, ""

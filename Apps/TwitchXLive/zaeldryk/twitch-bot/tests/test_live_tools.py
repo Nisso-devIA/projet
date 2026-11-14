@@ -122,6 +122,9 @@ class RecapTests(unittest.TestCase):
         self.assertEqual(payload["allowed_mentions"], {"parse": []})
         self.assertNotIn("@everyone", payload["content"])
         self.assertEqual(post_webhook("", text), 0)
+        from zaelbot.recap import deliver_recap
+
+        self.assertEqual(deliver_recap(text, pauses=(0,)), (0, ""))
         again = LiveStats(stats.export())
         again.begin("2026-11-11T18:00:00Z")
         self.assertEqual(again.follows, 1)
@@ -130,7 +133,7 @@ class RecapTests(unittest.TestCase):
 
     def test_examples_and_scopes(self):
         timer = json.loads((ROOT / "timers.example.json").read_text(encoding="utf-8"))
-        self.assertEqual(timer[0]["interval_seconds"], 1200)
+        self.assertEqual(timer[0]["interval_seconds"], 1800)
         self.assertGreaterEqual(timer[0]["min_messages"], 1)
         commands = json.loads((ROOT / "commands.example.json").read_text(encoding="utf-8"))
         self.assertIn("discord.gg/3vH2u7pme5", commands["discord"]["response"])
