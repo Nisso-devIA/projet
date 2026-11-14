@@ -391,24 +391,11 @@ def rtf_key() -> str:
 
 
 def discord_user_token() -> str:
-    env = _read_env_file(Path(os.environ.get("RTF_DISCORD_ENV", "/home/ubuntu/autobump/bump.env")))
-    return env.get("DISCORD_USER_TOKEN", "")
+    return ""
 
 
 def _discord_messages(channel_id: str) -> list[dict]:
-    token_value = discord_user_token()
-    if not token_value:
-        raise RuntimeError("discord")
-    request = urllib.request.Request(
-        f"https://discord.com/api/v10/channels/{channel_id}/messages?limit=30",
-        headers={
-            "Authorization": token_value,
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        payload = json.loads(response.read().decode())
-    return payload if isinstance(payload, list) else []
+    return []
 
 
 def _live_logins(logins: list[str]) -> set[str]:
@@ -434,19 +421,7 @@ RTF_GUILD = "935417890654547989"
 
 
 def _discord_json(path: str) -> dict:
-    token_value = discord_user_token()
-    if not token_value:
-        return {}
-    request = urllib.request.Request(
-        "https://discord.com/api/v10" + path,
-        headers={
-            "Authorization": token_value,
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        payload = json.loads(response.read().decode())
-    return payload if isinstance(payload, dict) else {}
+    return {}
 
 
 def _discord_profile(user_id: str) -> dict:
@@ -486,43 +461,11 @@ def _mention_profiles(messages: list[dict]) -> dict[str, dict]:
 
 
 def refresh_rtf() -> None:
-    global _rtf_body
-    moment = datetime.now(PARIS)
-    mapping_path = ROOT / "config" / "rtf-twitch-map.json"
-    mapping = {}
-    if mapping_path.exists():
-        mapping = {str(key): str(value).lower() for key, value in json.loads(mapping_path.read_text()).items()}
-    messages = []
-    for channel_id in DAYS.values():
-        for item in _discord_messages(channel_id):
-            copied = dict(item)
-            copied["channel_id"] = channel_id
-            messages.append(copied)
-    slots = planning_slots(messages, mapping, _mention_profiles(messages), moment)
-    announcement = announcement_target(_discord_messages(RAID_CHANNEL))
-    names = [slot.get("login") or "" for slot in slots]
-    names.append(announcement.get("login") or "")
-    names.append(SELF_LOGIN)
-    live = _live_logins(names)
-    snapshot = build_snapshot(
-        moment=moment,
-        slots=slots,
-        announcement=announcement,
-        live=live,
-        zaeldryk_live=SELF_LOGIN in live,
-    )
-    body = json.dumps(snapshot, ensure_ascii=False).encode()
-    with _rtf_lock:
-        _rtf_body = body
+    return
 
 
 def rtf_loop() -> None:
-    while True:
-        try:
-            refresh_rtf()
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, RuntimeError, OSError) as exc:
-            print(f"rtf: {type(exc).__name__}", flush=True)
-        time.sleep(60)
+    return
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -588,7 +531,6 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     threading.Thread(target=irc_loop, daemon=True).start()
-    threading.Thread(target=rtf_loop, daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"viewers overlay on :{PORT}", flush=True)
     server.serve_forever()
