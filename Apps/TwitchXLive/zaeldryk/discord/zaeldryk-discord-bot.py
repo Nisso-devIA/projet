@@ -22,6 +22,7 @@ from unverified import (
     start_unverified_watch,
 )
 from temp_voice import cleanup_empty_temp_channels, register_temp_voice
+from giveaway import register_giveaway, restore_giveaways
 
 CONFIG_PATH = Path("/home/ubuntu/zaeldryk/config/discord.env")
 XAI_ENV_PATH = Path("/home/ubuntu/zaeldryk/config/xai.env")
@@ -1053,8 +1054,14 @@ async def on_ready():
     except Exception as e:
         print(f"Live poll refresh error: {e}", flush=True)
     try:
+        restored = await restore_giveaways(bot)
+        print(f"Giveaways restored: {restored}", flush=True)
+    except Exception as exc:
+        print(f"Giveaway restore error: {exc}", flush=True)
+    try:
         synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-        print(f"Slash commands synced: {len(synced)}", flush=True)
+        names = sorted(command.name for command in synced)
+        print(f"Slash commands synced: {len(synced)} {names}", flush=True)
     except Exception as e:
         print(f"Slash sync error: {e}", flush=True)
 
@@ -1421,4 +1428,5 @@ except Exception as exc:
 register_temp_voice(bot)
 register_level_commands(bot)
 register_unverified_commands(bot)
+register_giveaway(bot)
 bot.run(BOT_TOKEN)
