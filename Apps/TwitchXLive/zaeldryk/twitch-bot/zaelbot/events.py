@@ -13,6 +13,22 @@ DEFAULT_TEMPLATES = {
 }
 
 
+def raid_thanks_text(name: str, viewers) -> str:
+    """Message du broadcaster. Un seul viewer : « 1 guerrier »."""
+    login = str(name or "").strip().lstrip("@") or "quelqu'un"
+    try:
+        count = int(viewers)
+    except (TypeError, ValueError):
+        count = 0
+    if count < 0:
+        count = 0
+    noun = "guerrier" if count == 1 else "guerriers"
+    return (
+        "🐺 Bienvenue au royaume de Zaelys, la meute de @"
+        f"{login} ! Merci pour ce raid de {count} {noun} ⚔️"
+    )
+
+
 def render_event(kind: str, payload: dict, templates: dict | None = None) -> str | None:
     book = dict(DEFAULT_TEMPLATES)
     if templates:

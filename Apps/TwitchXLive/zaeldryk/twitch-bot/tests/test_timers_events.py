@@ -7,7 +7,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from zaelbot.auth import parse_token_response, refresh_fields
-from zaelbot.events import event_from_notification, render_event, tiktok_line
+from zaelbot.events import event_from_notification, raid_thanks_text, render_event, tiktok_line
+from zaelbot.raid_thanks import SeenRaids, chat_body
 from zaelbot.helix_text import followage_text, uptime_text
 from zaelbot.tiktok_filter import TikTokFilter
 from zaelbot.timers import Timer, TimerScheduler
@@ -39,6 +40,23 @@ class EventTests(unittest.TestCase):
         self.assertEqual(payload["from_id"], "9")
         gift = event_from_notification("channel.subscribe", {"user_name": "A", "is_gift": True})
         self.assertIsNone(gift)
+        many = raid_thanks_text("Nisso", 12)
+        one = raid_thanks_text("@Nisso", 1)
+        self.assertEqual(
+            many,
+            "🐺 Bienvenue au royaume de Zaelys, la meute de @Nisso ! Merci pour ce raid de 12 guerriers ⚔️",
+        )
+        self.assertEqual(
+            one,
+            "🐺 Bienvenue au royaume de Zaelys, la meute de @Nisso ! Merci pour ce raid de 1 guerrier ⚔️",
+        )
+        seen = SeenRaids()
+        self.assertEqual(seen.claim("evt-1", "Nisso", 12), many)
+        self.assertIsNone(seen.claim("evt-1", "Nisso", 12))
+        self.assertIsNone(seen.claim("", "Nisso", 12))
+        body = chat_body("426411773", many)
+        self.assertEqual(body["sender_id"], "426411773")
+        self.assertEqual(body["broadcaster_id"], body["sender_id"])
 
     def test_tiktok_line_and_filter(self):
         self.assertEqual(tiktok_line("Luna", "  salut   "), "🎵 Luna : salut")

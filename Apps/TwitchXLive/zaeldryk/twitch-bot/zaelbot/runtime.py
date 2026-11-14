@@ -24,6 +24,7 @@ from zaelbot.greeting import DEFAULT_DELAY_SECONDS, DEFAULT_RULES_TEXT, LiveGree
 from zaelbot.helix_text import followage_text, shoutout_text, uptime_text
 from zaelbot.moderation import ModerationConfig, ModerationState, hate_command, sanction_line
 from zaelbot.permissions import allows, permission_level
+from zaelbot.raid_thanks import SeenRaids, chat_body
 from zaelbot.recap import (
     DEFAULT_RECAP_CHANNEL_ID,
     LiveStats,
@@ -154,6 +155,27 @@ def _save_welcomes(book: FirstWelcome) -> None:
 
 def _save_live(stats: LiveStats) -> None:
     atomic_write(DATA / "live-stats.json", stats.export())
+
+
+def _load_raid_seen() -> SeenRaids:
+    raw = read_json(DATA / "raid-thanks.json", {})
+    ids = raw.get("ids") if isinstance(raw, dict) else []
+    return SeenRaids(ids if isinstance(ids, list) else [])
+
+
+def _save_raid_seen(seen: SeenRaids) -> None:
+    atomic_write(DATA / "raid-thanks.json", seen.export())
+
+
+def _chat_token() -> str:
+    path = Path(os.environ.get("TWITCH_TOKEN_FILE", "/home/ubuntu/twitch_token.txt"))
+    try:
+        token = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    if token.lower().startswith("oauth:"):
+        token = token[6:]
+    return token
 
 
 def _load_templates() -> dict:
@@ -312,6 +334,14 @@ class Helix:
     def end_poll(self, body: dict, broadcaster_token: str) -> tuple[int, dict]:
         return self._request("PATCH", "/polls", body=body, token=broadcaster_token)
 
+    def send_broadcaster_chat(self, message: str, token: str) -> tuple[int, dict]:
+        return self._request(
+            "POST",
+            "/chat/messages",
+            body=chat_body(BROADCASTER_ID, message),
+            token=token,
+        )
+
     def shoutout(self, to_broadcaster_id: str) -> None:
         self._request(
             "POST",
@@ -357,6 +387,7 @@ class ZaelBot(commands.Bot):
         self.deaths = _load_deaths()
         self.welcomes = _load_welcomes()
         self.live = _load_live()
+        self.raid_seen = _load_raid_seen()
         self.votes = VoteBook()
         self.tiktok_filter = TikTokFilter()
         self.helix = Helix(os.environ["TWITCH_CLIENT_ID"], token)
@@ -608,12 +639,13 @@ class ZaelBot(commands.Bot):
                             elif kind == "notification":
                                 event_type = payload.get("subscription", {}).get("type")
                                 event = payload.get("event") or {}
+                                event_id = str((message.get("metadata") or {}).get("message_id") or "")
                                 if event_type == "stream.online":
                                     await self._on_stream_online(event)
                                 elif event_type == "stream.offline":
                                     await self._on_stream_offline()
                                 else:
-                                    await self._on_notification(payload)
+                                    await self._on_notification(payload, event_id)
             except Exception as exc:
                 log.warning("EventSub interrompu : %s", type(exc).__name__)
                 url = default_url
@@ -663,13 +695,23 @@ class ZaelBot(commands.Bot):
         finally:
             _env_unlock(handle)
 
-    async def _on_notification(self, payload: dict) -> None:
+    async def _on_notification(self, payload: dict, event_id: str = "") -> None:
         event_type = payload.get("subscription", {}).get("type", "")
         event = payload.get("event") or {}
         parsed = event_from_notification(event_type, event)
         if parsed is None:
             return
         kind, data = parsed
+        if kind == "raid":
+            self.live.note_event(kind, data)
+            _save_live(self.live)
+            if data.get("from_id"):
+                await asyncio.to_thread(self.helix.shoutout, data["from_id"])
+            text = self.raid_seen.claim(event_id, data.get("user"), data.get("viewers"))
+            if text:
+                _save_raid_seen(self.raid_seen)
+                asyncio.create_task(self._send_raid_thanks(text))
+            return
         text = render_event(kind, data, self.templates)
         channel = self.get_channel(CHANNEL_LOGIN)
         if channel is None or not text:
@@ -677,8 +719,25 @@ class ZaelBot(commands.Bot):
         await channel.send(text[:450])
         self.live.note_event(kind, data)
         _save_live(self.live)
-        if kind == "raid" and data.get("from_id"):
-            await asyncio.to_thread(self.helix.shoutout, data["from_id"])
+
+    async def _send_raid_thanks(self, text: str) -> None:
+        await asyncio.sleep(5)
+        if os.environ.get("RAID_THANKS_DRY_RUN") == "1":
+            log.info("Remerciement de raid non envoyé (dry-run)")
+            return
+        token = _chat_token()
+        if not token:
+            log.warning("Remerciement de raid non envoyé : jeton chat absent")
+            return
+        status, payload = await asyncio.to_thread(self.helix.send_broadcaster_chat, text, token)
+        sent = False
+        rows = payload.get("data") or []
+        if rows:
+            sent = bool(rows[0].get("is_sent"))
+        if status == 200 and sent:
+            log.info("Remerciement de raid envoyé")
+        else:
+            log.warning("Remerciement de raid refusé : HTTP %s", status)
 
     async def _tiktok_loop(self) -> None:
         unique = os.environ.get("TIKTOK_UNIQUE_ID", "zaeldryk").lstrip("@")
