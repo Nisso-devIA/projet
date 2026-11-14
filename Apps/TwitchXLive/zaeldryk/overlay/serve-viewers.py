@@ -380,6 +380,7 @@ _rtf_body = json.dumps(
         "current_slot": {"login": "", "start": None, "live": False},
         "next_slot": {"login": "", "start": None, "live": False},
         "announcement_login": "",
+        "week": [],
     }
 ).encode()
 _rtf_lock = threading.Lock()
@@ -429,15 +430,75 @@ def _live_logins(logins: list[str]) -> set[str]:
     return {str(row.get("user_login") or "").lower() for row in payload.get("data") or []}
 
 
+RTF_GUILD = "935417890654547989"
+
+
+def _discord_json(path: str) -> dict:
+    token_value = discord_user_token()
+    if not token_value:
+        return {}
+    request = urllib.request.Request(
+        "https://discord.com/api/v10" + path,
+        headers={
+            "Authorization": token_value,
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = json.loads(response.read().decode())
+    return payload if isinstance(payload, dict) else {}
+
+
+def _discord_profile(user_id: str) -> dict:
+    profile = {"twitch": "", "nick": "", "global_name": "", "username": ""}
+    try:
+        member = _discord_json(f"/guilds/{RTF_GUILD}/members/{user_id}")
+        user = member.get("user") or {}
+        profile["nick"] = member.get("nick") or ""
+        profile["global_name"] = user.get("global_name") or ""
+        profile["username"] = user.get("username") or ""
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        member = {}
+    try:
+        body = _discord_json(f"/users/{user_id}/profile?guild_id={RTF_GUILD}")
+        for account in body.get("connected_accounts") or []:
+            if str(account.get("type") or "").lower() == "twitch" and account.get("name"):
+                profile["twitch"] = str(account["name"])
+                break
+        user = body.get("user") or {}
+        profile["global_name"] = profile["global_name"] or user.get("global_name") or ""
+        profile["username"] = profile["username"] or user.get("username") or ""
+        guild_member = body.get("guild_member") or {}
+        profile["nick"] = profile["nick"] or guild_member.get("nick") or ""
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        pass
+    return profile
+
+
+def _mention_profiles(messages: list[dict]) -> dict[str, dict]:
+    ids = {
+        str(person.get("id"))
+        for message in messages
+        for person in (message.get("mentions") or [])
+        if person.get("id")
+    }
+    return {user_id: _discord_profile(user_id) for user_id in ids}
+
+
 def refresh_rtf() -> None:
     global _rtf_body
     moment = datetime.now(PARIS)
-    channel_id = DAYS[moment.weekday()]
     mapping_path = ROOT / "config" / "rtf-twitch-map.json"
     mapping = {}
     if mapping_path.exists():
         mapping = {str(key): str(value).lower() for key, value in json.loads(mapping_path.read_text()).items()}
-    slots = planning_slots(_discord_messages(channel_id), mapping)
+    messages = []
+    for channel_id in DAYS.values():
+        for item in _discord_messages(channel_id):
+            copied = dict(item)
+            copied["channel_id"] = channel_id
+            messages.append(copied)
+    slots = planning_slots(messages, mapping, _mention_profiles(messages), moment)
     announcement = announcement_target(_discord_messages(RAID_CHANNEL))
     names = [slot.get("login") or "" for slot in slots]
     names.append(announcement.get("login") or "")
