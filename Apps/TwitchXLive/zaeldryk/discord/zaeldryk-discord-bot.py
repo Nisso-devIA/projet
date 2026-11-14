@@ -23,6 +23,7 @@ from unverified import (
 )
 from temp_voice import cleanup_empty_temp_channels, register_temp_voice
 from giveaway import register_giveaway, restore_giveaways
+from bot_message import register_bot_message
 
 CONFIG_PATH = Path("/home/ubuntu/zaeldryk/config/discord.env")
 XAI_ENV_PATH = Path("/home/ubuntu/zaeldryk/config/xai.env")
@@ -1429,4 +1430,5 @@ register_temp_voice(bot)
 register_level_commands(bot)
 register_unverified_commands(bot)
 register_giveaway(bot)
+register_bot_message(bot)
 bot.run(BOT_TOKEN)
