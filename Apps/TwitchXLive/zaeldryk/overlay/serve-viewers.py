@@ -2,17 +2,30 @@
 """Pages OBS : spectateurs, objectif, alertes, chat et plaques du cadre."""
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import socket
 import ssl
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime
+from datetime import timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+from rtf_current import (
+    DAYS,
+    PARIS,
+    RAID_CHANNEL,
+    SELF_LOGIN,
+    announcement_target,
+    build_snapshot,
+    planning_slots,
+)
 
 ROOT = Path(os.environ.get("ZAEL_ROOT", "/home/ubuntu/zaeldryk"))
 HTML = Path(__file__).with_name("viewers.html")
@@ -34,9 +47,8 @@ _chat: list[dict] = []
 CHAT_KEEP = 30
 
 
-def load_env() -> dict:
+def _read_env_file(path: Path) -> dict:
     env = {}
-    path = ROOT / "config" / "twitch.env"
     if not path.exists():
         return env
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -45,6 +57,12 @@ def load_env() -> dict:
             continue
         key, value = line.split("=", 1)
         env[key.strip()] = value.strip().strip('"').strip("'")
+    return env
+
+
+def load_env() -> dict:
+    env = _read_env_file(ROOT / "config" / "twitch.env")
+    env.update(_read_env_file(Path(__file__).resolve().parent / ".env"))
     return env
 
 
@@ -351,6 +369,98 @@ def activity_body() -> bytes:
     return json.dumps(data, ensure_ascii=False).encode("utf-8")
 
 
+_rtf_body = json.dumps(
+    {
+        "login": "",
+        "since": None,
+        "source": "",
+        "source_msg_id": "",
+        "zaeldryk_live": False,
+        "current_slot": {"login": "", "start": None, "live": False},
+        "next_slot": {"login": "", "start": None, "live": False},
+    }
+).encode()
+_rtf_lock = threading.Lock()
+
+
+def rtf_key() -> str:
+    return load_env().get("RTF_LURK_KEY", "")
+
+
+def discord_user_token() -> str:
+    env = _read_env_file(Path(os.environ.get("RTF_DISCORD_ENV", "/home/ubuntu/autobump/bump.env")))
+    return env.get("DISCORD_USER_TOKEN", "")
+
+
+def _discord_messages(channel_id: str) -> list[dict]:
+    token_value = discord_user_token()
+    if not token_value:
+        raise RuntimeError("discord")
+    request = urllib.request.Request(
+        f"https://discord.com/api/v10/channels/{channel_id}/messages?limit=30",
+        headers={
+            "Authorization": token_value,
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = json.loads(response.read().decode())
+    return payload if isinstance(payload, list) else []
+
+
+def _live_logins(logins: list[str]) -> set[str]:
+    names = [name for name in dict.fromkeys(logins) if name]
+    if not names:
+        return set()
+    env = load_env()
+    query = urllib.parse.urlencode([("user_login", name) for name in names])
+    request = urllib.request.Request(
+        "https://api.twitch.tv/helix/streams?" + query,
+        headers={
+            "Client-ID": env.get("TWITCH_CLIENT_ID", ""),
+            "Authorization": "Bearer " + token(),
+            "User-Agent": "ZaelrysViewers/1.0",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = json.loads(response.read().decode())
+    return {str(row.get("user_login") or "").lower() for row in payload.get("data") or []}
+
+
+def refresh_rtf() -> None:
+    global _rtf_body
+    moment = datetime.now(PARIS)
+    channel_id = DAYS[moment.weekday()]
+    mapping_path = ROOT / "config" / "rtf-twitch-map.json"
+    mapping = {}
+    if mapping_path.exists():
+        mapping = {str(key): str(value).lower() for key, value in json.loads(mapping_path.read_text()).items()}
+    slots = planning_slots(_discord_messages(channel_id), mapping)
+    announcement = announcement_target(_discord_messages(RAID_CHANNEL))
+    current = (slots.get(moment.hour) or {}).get("login") or ""
+    nxt = (slots.get((moment.hour + 1) % 24) or {}).get("login") or ""
+    live = _live_logins([current, nxt, announcement.get("login") or "", SELF_LOGIN])
+    snapshot = build_snapshot(
+        moment=moment,
+        slots=slots,
+        announcement=announcement,
+        live=live,
+        zaeldryk_live=SELF_LOGIN in live,
+    )
+    body = json.dumps(snapshot, ensure_ascii=False).encode()
+    with _rtf_lock:
+        _rtf_body = body
+
+
+def rtf_loop() -> None:
+    while True:
+        try:
+            refresh_rtf()
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, RuntimeError, OSError) as exc:
+            print(f"rtf: {type(exc).__name__}", flush=True)
+        time.sleep(60)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         return
@@ -364,7 +474,19 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self) -> None:
-        path = self.path.split("?", 1)[0]
+        parsed = urllib.parse.urlsplit(self.path)
+        path = parsed.path
+        if path == "/rtf-current":
+            given = (urllib.parse.parse_qs(parsed.query).get("key") or [""])[0]
+            expected = rtf_key()
+            if not expected or not hmac.compare_digest(given, expected):
+                self.send_response(403)
+                self.end_headers()
+                return
+            with _rtf_lock:
+                body = _rtf_body
+            self._send(body, "application/json; charset=utf-8")
+            return
         if path.startswith("/sounds/"):
             name = Path(path).name
             sound = Path(__file__).resolve().parent / "sounds" / name
@@ -402,6 +524,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     threading.Thread(target=irc_loop, daemon=True).start()
+    threading.Thread(target=rtf_loop, daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"viewers overlay on :{PORT}", flush=True)
     server.serve_forever()
