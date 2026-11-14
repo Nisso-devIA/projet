@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
+import json
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+ROOT = Path(__file__).resolve().parent.parent
 
 from zaelbot.commands import CooldownBook, CommandBook, manage_command, parse_command, render_response
 from zaelbot.permissions import allows, permission_level
@@ -12,6 +15,11 @@ from zaelbot.permissions import allows, permission_level
 class ParseTests(unittest.TestCase):
     def test_parse_name_and_args(self):
         self.assertEqual(parse_command("!discord"), ("discord", ""))
+        book = CommandBook(json.loads((ROOT / "commands.example.json").read_text(encoding="utf-8")))
+        self.assertEqual(book.get("tip").name, "don")
+        self.assertEqual(book.get("soutien").name, "don")
+        self.assertIn("ko-fi.com/zaeldryk", book.get("don").response)
+        self.assertNotIn("tip", book.visible_names())
         self.assertEqual(parse_command("  !So Zaeldryk"), ("so", "Zaeldryk"))
         self.assertIsNone(parse_command("bonjour"))
         self.assertIsNone(parse_command("!"))

@@ -119,7 +119,11 @@ def _load_timers() -> TimerScheduler:
     # A restart must not send the reminders at once. The interval starts now.
     started = _now()
     for timer in timers:
-        timer.last_sent = started
+        # offset 0 waits a full interval. A positive offset fires that long after boot.
+        if timer.start_offset_seconds > 0:
+            timer.last_sent = started - (timer.interval_seconds - timer.start_offset_seconds)
+        else:
+            timer.last_sent = started
     return TimerScheduler(timers)
 
 
@@ -513,9 +517,9 @@ class ZaelBot(commands.Bot):
             return None
         if not allows(level, command.permission):
             return None
-        if not self.cooldowns.ready(name, author.name, now, command.cooldown, command.user_cooldown):
+        if not self.cooldowns.ready(command.name, author.name, now, command.cooldown, command.user_cooldown):
             return None
-        self.cooldowns.mark(name, author.name, now, command.cooldown, command.user_cooldown)
+        self.cooldowns.mark(command.name, author.name, now, command.cooldown, command.user_cooldown)
         return render_response(command.response, author.display_name or author.name, args, CHANNEL_LOGIN)
 
     def _builtin(self, name: str, args: str, author, level: str) -> str | None:

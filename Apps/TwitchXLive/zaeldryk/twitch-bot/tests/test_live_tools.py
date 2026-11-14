@@ -133,10 +133,16 @@ class RecapTests(unittest.TestCase):
 
     def test_examples_and_scopes(self):
         timer = json.loads((ROOT / "timers.example.json").read_text(encoding="utf-8"))
-        self.assertEqual(timer[0]["interval_seconds"], 1800)
-        self.assertGreaterEqual(timer[0]["min_messages"], 1)
+        by_name = {item["name"]: item for item in timer}
+        self.assertEqual(by_name["discord"]["interval_seconds"], 1800)
+        self.assertGreaterEqual(by_name["discord"]["min_messages"], 1)
+        self.assertEqual(by_name["don"]["interval_seconds"], 2700)
+        self.assertEqual(by_name["don"]["min_messages"], 8)
+        self.assertEqual(by_name["don"]["start_offset_seconds"], 2250)
         commands = json.loads((ROOT / "commands.example.json").read_text(encoding="utf-8"))
         self.assertIn("discord.gg/3vH2u7pme5", commands["discord"]["response"])
+        self.assertEqual(commands["don"]["response"], by_name["don"]["message"])
+        self.assertEqual(commands["don"]["aliases"], ["tip", "soutien"])
         moderation = json.loads((ROOT / "moderation.example.json").read_text(encoding="utf-8"))
         self.assertIn("putain", moderation["vulgar_words"])
         self.assertIn("clips:edit", BROADCASTER_SCOPES)

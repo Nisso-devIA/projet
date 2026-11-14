@@ -31,6 +31,16 @@ class TimerTests(unittest.TestCase):
         self.assertEqual(scheduler.due(550), [])
         self.assertEqual([item.name for item in scheduler.due(700)], ["discord"])
 
+    def test_don_timer_waits_and_does_not_follow_discord(self):
+        discord = Timer("discord", "d", interval_seconds=1800, min_messages=8, last_sent=0)
+        don = Timer("don", "k", interval_seconds=2700, min_messages=8, last_sent=-450)
+        scheduler = TimerScheduler([discord, don], gap_seconds=120)
+        for _ in range(8):
+            scheduler.on_chat_message()
+        self.assertEqual([item.name for item in scheduler.due(1800)], ["discord"])
+        self.assertEqual(scheduler.due(1810), [])
+        self.assertEqual([item.name for item in scheduler.due(2250)], ["don"])
+
 
 class EventTests(unittest.TestCase):
     def test_notifications_become_chat_lines(self):

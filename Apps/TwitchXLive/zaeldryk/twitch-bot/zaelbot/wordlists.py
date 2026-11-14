@@ -145,4 +145,5 @@ OWN_MARKERS = [
     "youtube.com/@zaeldryk",
     "youtube.com/zaeldryk",
     "kick.com/zaeldryk",
+    "ko-fi.com/zaeldryk",
 ]

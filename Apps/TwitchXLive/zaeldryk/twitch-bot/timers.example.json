@@ -4,5 +4,12 @@
     "message": "Le Discord du Royaume est ouvert : https://discord.gg/3vH2u7pme5",
     "interval_seconds": 1800,
     "min_messages": 8
+  },
+  {
+    "name": "don",
+    "message": "💚 Envie de soutenir la chaîne ? Chaque don aide à améliorer le setup et à organiser des giveaways sur le Discord du royaume 🐺 → https://ko-fi.com/zaeldryk Merci du fond du cœur, la meute ! ⚔️",
+    "interval_seconds": 2700,
+    "min_messages": 8,
+    "start_offset_seconds": 2250
   }
 ]

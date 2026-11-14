@@ -31,6 +31,7 @@ class ModerationTests(unittest.TestCase):
         self.assertIsNone(self.state.inspect("mod", "https://example.com", 0, exempt=True))
 
     def test_link_then_permit_then_timeout_grows(self):
+        self.assertIsNone(self.state.inspect("viewer", "https://ko-fi.com/zaeldryk", 0, exempt=False))
         first = self.state.inspect("viewer", "va sur https://example.com", 0, exempt=False)
         self.assertEqual(first.reason, "lien non autorisé")
         self.assertEqual(first.duration, 60)

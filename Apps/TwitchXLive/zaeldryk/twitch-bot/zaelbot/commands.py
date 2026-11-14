@@ -45,6 +45,7 @@ class Command:
     cooldown: float = 10
     user_cooldown: float = 30
     enabled: bool = True
+    aliases: tuple[str, ...] = ()
 
 
 def parse_command(content: str, prefix: str = "!") -> tuple[str, str] | None:
@@ -91,8 +92,12 @@ class CooldownBook:
 class CommandBook:
     def __init__(self, commands: dict | None = None) -> None:
         self.commands: dict[str, Command] = {}
+        self.aliases: dict[str, str] = {}
         for name, raw in (commands or {}).items():
-            self.commands[name.lower()] = self._from_raw(name, raw)
+            command = self._from_raw(name, raw)
+            self.commands[command.name] = command
+            for alias in command.aliases:
+                self.aliases[alias] = command.name
 
     @staticmethod
     def _from_raw(name: str, raw: dict) -> Command:
@@ -103,6 +108,11 @@ class CommandBook:
             cooldown=float(raw.get("cooldown") or 0),
             user_cooldown=float(raw.get("user_cooldown") or 0),
             enabled=bool(raw.get("enabled", True)),
+            aliases=tuple(
+                str(alias).lower().lstrip("!")
+                for alias in (raw.get("aliases") or [])
+                if str(alias).strip()
+            ),
         )
 
     def to_dict(self) -> dict:
@@ -113,12 +123,15 @@ class CommandBook:
                 "cooldown": cmd.cooldown,
                 "user_cooldown": cmd.user_cooldown,
                 "enabled": cmd.enabled,
+                **({"aliases": list(cmd.aliases)} if cmd.aliases else {}),
             }
             for cmd in self.commands.values()
         }
 
     def get(self, name: str) -> Command | None:
-        cmd = self.commands.get(name.lower())
+        key = name.lower()
+        key = self.aliases.get(key, key)
+        cmd = self.commands.get(key)
         if cmd is None or not cmd.enabled:
             return None
         return cmd

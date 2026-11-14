@@ -20,6 +20,14 @@
     "user_cooldown": 30,
     "enabled": true
   },
+  "don": {
+    "response": "💚 Envie de soutenir la chaîne ? Chaque don aide à améliorer le setup et à organiser des giveaways sur le Discord du royaume 🐺 → https://ko-fi.com/zaeldryk Merci du fond du cœur, la meute ! ⚔️",
+    "permission": "everyone",
+    "cooldown": 15,
+    "user_cooldown": 30,
+    "enabled": true,
+    "aliases": ["tip", "soutien"]
+  },
   "commandes": {
     "response": "",
     "permission": "everyone",
