@@ -22,6 +22,7 @@ from unverified import (
     start_unverified_watch,
 )
 from temp_voice import cleanup_empty_temp_channels, register_temp_voice
+from annonce_access import can_use_annonce
 from giveaway import register_giveaway, restore_giveaways
 from bot_message import register_bot_message
 
@@ -471,7 +472,7 @@ def is_owner(member: discord.Member) -> bool:
 
 
 def can_announce(member: discord.Member) -> bool:
-    return is_owner(member) or is_staff(member)
+    return can_use_annonce(member.id, [role.id for role in member.roles])
 
 
 def parse_embed_color(raw: str) -> int | None:
@@ -590,7 +591,7 @@ class AnnonceConfirmView(discord.ui.View):
     @discord.ui.button(label="Publier", style=discord.ButtonStyle.success)
     async def publish(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not isinstance(interaction.user, discord.Member) or not can_announce(interaction.user):
-            await interaction.response.send_message("⛔ Réservé owner / staff.", ephemeral=True)
+            await interaction.response.send_message("⛔ Réservé au propriétaire, à ⚔️ Sentinelle et à 🌑 Ombre.", ephemeral=True)
             return
         guild = interaction.guild
         channel = guild.get_channel(CHANNEL_ANNONCES_ID) if guild else None
@@ -641,7 +642,7 @@ class AnnonceModal(discord.ui.Modal, title="Annonce (générée par Grok)"):
 
     async def on_submit(self, interaction: discord.Interaction):
         if not isinstance(interaction.user, discord.Member) or not can_announce(interaction.user):
-            await interaction.response.send_message("⛔ Réservé owner / staff.", ephemeral=True)
+            await interaction.response.send_message("⛔ Réservé au propriétaire, à ⚔️ Sentinelle et à 🌑 Ombre.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         brief = str(self.brief.value).strip()
@@ -1123,6 +1124,7 @@ async def on_ready():
     description="Grok rédige une annonce Zaelrys, tu valides, ça part dans #annonces",
     guild=discord.Object(id=GUILD_ID),
 )
+@app_commands.default_permissions(manage_messages=True)
 @app_commands.describe(ping="Mention @everyone ?")
 @app_commands.choices(
     ping=[
@@ -1137,7 +1139,7 @@ async def annonce_cmd(
     print(f"/annonce par {interaction.user} ping={getattr(ping, 'value', None)}", flush=True)
     if not isinstance(interaction.user, discord.Member) or not can_announce(interaction.user):
         await interaction.response.send_message(
-            "⛔ Réservé à l’owner / staff (⚔️ Sentinelle).",
+            "⛔ Réservé au propriétaire, à ⚔️ Sentinelle et à 🌑 Ombre.",
             ephemeral=True,
         )
         return
