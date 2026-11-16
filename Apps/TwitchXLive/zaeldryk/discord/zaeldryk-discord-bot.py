@@ -1121,7 +1121,7 @@ async def on_ready():
 
 @bot.tree.command(
     name="annonce",
-    description="Grok rédige une annonce Zaelrys, tu valides, ça part dans #annonces",
+    description="Grok rédige une annonce Zaelys, tu valides, ça part dans #annonces",
     guild=discord.Object(id=GUILD_ID),
 )
 @app_commands.default_permissions(manage_messages=True)
