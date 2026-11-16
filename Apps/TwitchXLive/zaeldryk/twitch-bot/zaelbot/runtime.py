@@ -379,8 +379,8 @@ class Helix:
             token=token,
         )
 
-    def shoutout(self, to_broadcaster_id: str) -> None:
-        self._request(
+    def shoutout(self, to_broadcaster_id: str) -> int:
+        status, _payload = self._request(
             "POST",
             "/chat/shoutouts",
             query={
@@ -389,6 +389,7 @@ class Helix:
                 "moderator_id": BOT_USER_ID,
             },
         )
+        return status
 
     def subscribe_event(
         self,
@@ -657,10 +658,22 @@ class ZaelBot(commands.Bot):
         while True:
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.ws_connect(url) as ws:
-                        async for raw in ws:
+                    async with session.ws_connect(url, heartbeat=15.0) as ws:
+                        while True:
+                            try:
+                                raw = await asyncio.wait_for(ws.receive(), timeout=45)
+                            except asyncio.TimeoutError:
+                                log.warning("EventSub silencieux, reconnexion")
+                                url = default_url
+                                break
                             if raw.type != aiohttp.WSMsgType.TEXT:
-                                continue
+                                if raw.type in (
+                                    aiohttp.WSMsgType.CLOSED,
+                                    aiohttp.WSMsgType.CLOSING,
+                                    aiohttp.WSMsgType.ERROR,
+                                ):
+                                    url = default_url
+                                break
                             message = json.loads(raw.data)
                             kind = message.get("metadata", {}).get("message_type")
                             payload = message.get("payload", {})
@@ -744,8 +757,13 @@ class ZaelBot(commands.Bot):
         if kind == "raid":
             self.live.note_event(kind, data)
             _save_live(self.live)
+            log.info("Raid reçu de %s (%s)", data.get("user") or "?", data.get("viewers"))
             if data.get("from_id"):
-                await asyncio.to_thread(self.helix.shoutout, data["from_id"])
+                try:
+                    status = await asyncio.to_thread(self.helix.shoutout, data["from_id"])
+                    log.info("Shoutout HTTP %s", status)
+                except Exception as exc:
+                    log.warning("Shoutout impossible : %s", type(exc).__name__)
             text = self.raid_seen.claim(event_id, data.get("user"), data.get("viewers"))
             if text:
                 _save_raid_seen(self.raid_seen)
