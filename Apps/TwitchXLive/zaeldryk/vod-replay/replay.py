@@ -105,18 +105,34 @@ def chapter_block(chapters: list[tuple[int, str]]) -> str:
     return "\n".join(f"{stamp(moment)} {name}" for moment, name in chapters)
 
 
-def game_label(title: str) -> str:
-    text = title or ""
-    for word, label in (
-        ("ocarina", "Ocarina of Time"),
-        ("zelda", "Zelda"),
-        ("mario", "Mario"),
-        ("pokemon", "Pokémon"),
-        ("pokémon", "Pokémon"),
-    ):
-        if word in text.lower():
+DEFAULT_GAME = "Zelda Ocarina of Time"
+GENERIC_CATEGORIES = {
+    "just chatting",
+    "music",
+    "art",
+    "asmr",
+    "sports",
+    "talk shows & podcasts",
+    "special events",
+    "pools, hot tubs, and beaches",
+    "software and game development",
+}
+
+
+def game_label(title: str, category: str = "") -> str:
+    """Catégorie Twitch d'abord, puis le titre, sinon Zelda Ocarina of Time."""
+    name = " ".join((category or "").split())
+    if name and name.lower() not in GENERIC_CATEGORIES:
+        if "ocarina" in name.lower():
+            return DEFAULT_GAME
+        return name
+    text = (title or "").lower()
+    if "ocarina" in text or "zelda" in text:
+        return DEFAULT_GAME
+    for word, label in (("mario", "Mario"), ("pokemon", "Pokémon"), ("pokémon", "Pokémon")):
+        if word in text:
             return label
-    return "Aventure"
+    return DEFAULT_GAME
 
 
 def title_for(game: str, when: datetime) -> str:
@@ -189,6 +205,24 @@ def save_journal(data: dict) -> None:
 def journal_done(data: dict, vod_id: str) -> bool:
     row = (data.get("vods") or {}).get(vod_id) or {}
     return bool(row.get("youtube_id")) and row.get("status") in {"private", "public", "posted"}
+
+
+def channel_game(client_id: str, token: str) -> str:
+    """Catégorie actuelle de la chaîne. Vide si Helix ne la donne pas."""
+    query = urllib.parse.urlencode({"broadcaster_id": BROADCASTER_ID})
+    request = urllib.request.Request(
+        "https://api.twitch.tv/helix/channels?" + query,
+        headers={"Client-ID": client_id, "Authorization": "Bearer " + token},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode())
+    except (urllib.error.URLError, json.JSONDecodeError):
+        return ""
+    rows = payload.get("data") or []
+    if not rows:
+        return ""
+    return str(rows[0].get("game_name") or "")
 
 
 def helix_videos(client_id: str, token: str) -> list[dict]:
@@ -465,7 +499,10 @@ def post_discord(text: str) -> str:
 def plan(vod: dict) -> tuple[str, str, list[tuple[int, str]]]:
     end = vod_end(vod)
     when = end or datetime.now(PARIS)
-    game = game_label(str(vod.get("title") or ""))
+    game = game_label(
+        str(vod.get("title") or ""),
+        str(vod.get("game_name") or vod.get("category") or ""),
+    )
     chapters = fallback_chapters(parse_duration(str(vod.get("duration") or "")))
     return game, title_for(game, when), chapters
 
@@ -475,6 +512,8 @@ def run(dry_run: bool) -> int:
     client_id, token = twitch_credentials()
     vods = helix_videos(client_id, token)
     vod = select_evening_vod(vods, now)
+    if vod is not None and not (vod.get("game_name") or vod.get("category")):
+        vod["game_name"] = channel_game(client_id, token)
     if vod is None:
         log("aucune rediffusion de la veille après 20:00, rien à faire")
         return 0
