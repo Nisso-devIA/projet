@@ -248,6 +248,31 @@ class Helix:
             return None
         return info.get("started_at") or None
 
+    def followers_during(self, started_at: str, ended_at: str) -> list[str] | None:
+        """Follows Helix du live. None si l'API ne répond pas."""
+        from zaelbot.recap import follows_in_window
+
+        names: list[str] = []
+        cursor = ""
+        for _ in range(10):
+            query = {"broadcaster_id": BROADCASTER_ID, "first": 100}
+            if cursor:
+                query["after"] = cursor
+            status, payload = self._request("GET", "/channels/followers", query=query)
+            if status != 200:
+                return None
+            rows = payload.get("data") or []
+            if not rows:
+                break
+            names.extend(follows_in_window(rows, started_at, ended_at))
+            oldest = str(rows[-1].get("followed_at") or "")
+            if oldest and oldest < started_at:
+                break
+            cursor = str((payload.get("pagination") or {}).get("cursor") or "")
+            if not cursor:
+                break
+        return names
+
     def channel(self) -> dict:
         status, payload = self._request("GET", "/channels", query={"broadcaster_id": BROADCASTER_ID})
         if status != 200 or not payload.get("data"):
@@ -727,12 +752,14 @@ class ZaelBot(commands.Bot):
                 asyncio.create_task(self._send_raid_thanks(text))
             return
         text = render_event(kind, data, self.templates)
+        self.live.note_event(kind, data)
+        _save_live(self.live)
+        if kind == "follow":
+            log.info("Follow compté")
         channel = self.get_channel(CHANNEL_LOGIN)
         if channel is None or not text:
             return
         await channel.send(text[:450])
-        self.live.note_event(kind, data)
-        _save_live(self.live)
 
     async def _send_raid_thanks(self, text: str) -> None:
         await asyncio.sleep(5)
@@ -870,6 +897,11 @@ class ZaelBot(commands.Bot):
         if not self.live.stream_id or self.live.recapped or not self.live.started_at:
             return
         ended = datetime.datetime.now(datetime.timezone.utc)
+        ended_iso = ended.strftime("%Y-%m-%dT%H:%M:%SZ")
+        names = await asyncio.to_thread(self.helix.followers_during, self.live.started_at, ended_iso)
+        if names is not None:
+            self.live.follows = len(names)
+            _save_live(self.live)
         token = os.environ.get("TWITCH_BROADCASTER_ACCESS_TOKEN", "")
         clips = []
         for clip_id in self.live.clip_ids:

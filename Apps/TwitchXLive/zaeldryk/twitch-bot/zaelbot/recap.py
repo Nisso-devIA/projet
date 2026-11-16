@@ -90,6 +90,31 @@ class LiveStats:
         }
 
 
+def follows_in_window(rows: list[dict], started_at: str, ended_at: str) -> list[str]:
+    """Noms des follows dont followed_at tombe dans le live."""
+    start = _parse_iso(started_at)
+    end = _parse_iso(ended_at)
+    if start is None or end is None:
+        return []
+    names = []
+    for row in rows:
+        when = _parse_iso(str(row.get("followed_at") or ""))
+        if when is None or when < start or when > end:
+            continue
+        names.append(str(row.get("user_name") or row.get("user_login") or "quelqu'un"))
+    return names
+
+
+def _parse_iso(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat((value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def duration_text(started_at: str, ended: datetime | None = None) -> str:
     if not started_at:
         return "durée inconnue"

@@ -158,6 +158,20 @@ class RecapTests(unittest.TestCase):
         self.assertEqual(reloaded.stream_id, "9002")
         self.assertFalse(reloaded.recapped)
 
+    def test_follows_during_the_live_only(self):
+        from zaelbot.recap import follows_in_window
+
+        rows = [
+            {"user_name": "avant", "followed_at": "2026-11-16T20:00:00Z"},
+            {"user_name": "Evashura", "followed_at": "2026-11-16T21:03:04Z"},
+            {"user_name": "lolodamouw", "followed_at": "2026-11-16T21:53:29Z"},
+            {"user_name": "apres", "followed_at": "2026-11-16T23:00:00Z"},
+        ]
+        self.assertEqual(
+            follows_in_window(rows, "2026-11-16T20:51:55Z", "2026-11-16T22:38:32Z"),
+            ["Evashura", "lolodamouw"],
+        )
+
     def test_examples_and_scopes(self):
         timer = json.loads((ROOT / "timers.example.json").read_text(encoding="utf-8"))
         by_name = {item["name"]: item for item in timer}
