@@ -3,7 +3,14 @@ import unittest
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from rtf_raid import merge_env_text, parse_target, slot_line, user_on_line, wait_until_fire
+from rtf_raid import (
+    manual_override,
+    merge_env_text,
+    parse_target,
+    slot_line,
+    user_on_line,
+    wait_until_fire,
+)
 
 PARIS = ZoneInfo("Europe/Paris")
 
@@ -57,6 +64,17 @@ class ParseTests(unittest.TestCase):
         self.assertIn("TWITCH_BROADCASTER_ACCESS_TOKEN=new-access\n", merged)
         self.assertIn("TWITCH_BROADCASTER_REFRESH_TOKEN=new-refresh\n", merged)
         self.assertNotIn("old-access", merged)
+
+    def test_manual_target_is_only_valid_on_its_date(self):
+        env = {"RTF_RAID_TARGET": "@Mrkrakottefr", "RTF_RAID_TARGET_DATE": "2026-11-16"}
+        tonight = datetime(2026, 11, 16, 22, 50, tzinfo=PARIS)
+        tomorrow = datetime(2026, 11, 17, 22, 50, tzinfo=PARIS)
+        self.assertEqual(manual_override(tonight, env), ("mrkrakottefr", True))
+        self.assertEqual(manual_override(tomorrow, env), (None, True))
+
+    def test_missing_manual_target_keeps_the_discord_path(self):
+        moment = datetime(2026, 11, 16, 22, 50, tzinfo=PARIS)
+        self.assertEqual(manual_override(moment, {}), (None, False))
 
     def test_fire_only_waits_near_225930(self):
         morning = datetime(2026, 11, 12, 12, 0, tzinfo=PARIS)

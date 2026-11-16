@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Raid Twitch automatique vers la tranche 23h-00h du planning RTF.
 
-Lecture Discord en lecture seule. Aucun message Discord. Le POST /raids
-n'est fait que si RTF_RAID_ENABLED=1 et RTF_RAID_DRY_RUN=0.
+Lecture Discord en lecture seule, sauf si RTF_RAID_TARGET et
+RTF_RAID_TARGET_DATE sont le jour Europe/Paris : aucune lecture Discord.
+Aucun message Discord. Le POST /raids n'est fait que si RTF_RAID_ENABLED=1
+et RTF_RAID_DRY_RUN=0.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ DISCORD_USER_ENV = Path(
 )
 MAP_PATH = Path(os.environ.get("RTF_MAP", ROOT / "config" / "rtf-twitch-map.json"))
 STATE_PATH = ROOT / "state" / "rtf-raid.json"
+TARGET_PATH = ROOT / "config" / "rtf-raid-target.json"
 LOG_PATH = ROOT / "logs" / "rtf-raid.log"
 BOT_ENV = Path(os.environ.get("TWITCH_BOT_ENV", ROOT / "twitch-bot" / ".env"))
 TOKEN_LOCK = Path(
@@ -86,6 +89,31 @@ def load_env(path: Path) -> dict:
 
 def enabled() -> bool:
     return load_env(RAID_ENV).get("RTF_RAID_ENABLED", "0") == "1"
+
+
+def _clean_login(value: str) -> str:
+    return (value or "").strip().lstrip("@").lower()
+
+
+def manual_override(moment: datetime, env: dict | None = None) -> tuple[str | None, bool]:
+    """Cible du jour, sans Discord.
+
+    Retourne (login ou None, mode manuel). Le mode manuel est actif dès qu'une
+    cible est configurée : une date autre que le jour Paris courant ne lance
+    pas de raid et ne lit pas Discord.
+    """
+    values = env if env is not None else load_env(RAID_ENV)
+    login = _clean_login(values.get("RTF_RAID_TARGET", ""))
+    day = (values.get("RTF_RAID_TARGET_DATE") or "").strip()
+    if not login and env is None and TARGET_PATH.exists():
+        data = json.loads(TARGET_PATH.read_text(encoding="utf-8"))
+        login = _clean_login(str(data.get("login") or ""))
+        day = str(data.get("date") or "").strip()
+    if not login:
+        return None, False
+    if day != moment.date().isoformat():
+        return None, True
+    return login, True
 
 
 def dry_run(forced: bool = False) -> bool:
@@ -377,6 +405,25 @@ def mention_name(messages: list[dict], discord_id: str) -> str:
 def prepare(token: str, when: datetime | None = None) -> dict:
     moment = when or datetime.now(PARIS)
     day_name, channel_id = DAYS[moment.weekday()]
+    login, manual = manual_override(moment)
+    if manual:
+        state = {
+            "date": moment.date().isoformat(),
+            "day": day_name,
+            "channel_id": "",
+            "discord_id": "",
+            "twitch_login": login,
+            "source": "manuel" if login else "expire",
+            "prepared_at": moment.isoformat(),
+        }
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.chmod(STATE_PATH, 0o600)
+        if login:
+            log(f"prepare {day_name}: cible manuelle {login}, sans Discord")
+        else:
+            log(f"prepare {day_name}: cible manuelle expirée, pas de raid")
+        return state
     messages = read_day_messages(token, channel_id)
     discord_id = parse_target(messages)
     login, source = (None, "vide")
@@ -481,8 +528,9 @@ def main() -> int:
         now = wait_until_fire(now)
         if now is None:
             return 0
-    token = load_env(DISCORD_USER_ENV).get("DISCORD_USER_TOKEN", "")
-    if not token:
+    _login, manual = manual_override(now)
+    token = "" if manual else load_env(DISCORD_USER_ENV).get("DISCORD_USER_TOKEN", "")
+    if not manual and not token:
         log("DISCORD_USER_TOKEN absent, arrêt")
         return 1
     if args.prepare or not args.fire:
