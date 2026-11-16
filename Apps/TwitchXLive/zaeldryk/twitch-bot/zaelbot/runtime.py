@@ -231,14 +231,22 @@ class Helix:
                 detail = ""
             return exc.code, {"message": detail}
 
-    def stream_started_at(self) -> str | None:
+    def current_stream(self) -> dict | None:
+        """Live en cours. {} si hors ligne, None si Helix n'a pas répondu."""
         status, payload = self._request("GET", "/streams", query={"user_id": BROADCASTER_ID})
         if status != 200:
             return None
         data = payload.get("data") or []
         if not data:
+            return {}
+        row = data[0]
+        return {"id": str(row.get("id") or ""), "started_at": str(row.get("started_at") or "")}
+
+    def stream_started_at(self) -> str | None:
+        info = self.current_stream()
+        if not info:
             return None
-        return data[0].get("started_at")
+        return info.get("started_at") or None
 
     def channel(self) -> dict:
         status, payload = self._request("GET", "/channels", query={"broadcaster_id": BROADCASTER_ID})
@@ -391,6 +399,7 @@ class ZaelBot(commands.Bot):
         self.deaths = _load_deaths()
         self.welcomes = _load_welcomes()
         self.live = _load_live()
+        self._recap_lock = asyncio.Lock()
         self.raid_seen = _load_raid_seen()
         self.votes = VoteBook()
         self.tiktok_filter = TikTokFilter()
@@ -400,6 +409,7 @@ class ZaelBot(commands.Bot):
     async def event_ready(self) -> None:
         log.info("Connecté au chat de #%s", CHANNEL_LOGIN)
         asyncio.create_task(self._greet_current_live())
+        asyncio.create_task(self._stream_watch_loop())
         asyncio.create_task(self._timers_loop())
         asyncio.create_task(self._eventsub_loop())
         asyncio.create_task(self._tiktok_loop())
@@ -802,24 +812,64 @@ class ZaelBot(commands.Bot):
             await asyncio.to_thread(self.helix.timeout, author.id, action.duration, action.reason)
 
     async def _greet_current_live(self) -> None:
-        started = await asyncio.to_thread(self.helix.stream_started_at)
-        if started:
-            self.live.begin(started)
-            _save_live(self.live)
+        await self._watch_stream_once()
+
+    async def _stream_watch_loop(self) -> None:
+        """Rattrape un stream.online manqué, sans confondre une erreur Helix avec une fin de live."""
+        await asyncio.sleep(45)
+        while True:
+            try:
+                await self._watch_stream_once()
+            except Exception as exc:
+                log.warning("Suivi du live interrompu : %s", type(exc).__name__)
+            await asyncio.sleep(60)
+
+    async def _watch_stream_once(self) -> None:
+        info = await asyncio.to_thread(self.helix.current_stream)
+        if info is None:
+            return
+        if info.get("id"):
+            await self._adopt_stream(info["id"], info.get("started_at") or "")
+            return
+        await self._recap_if_needed()
+
+    async def _adopt_stream(self, stream_id: str, started_at: str) -> None:
+        async with self._recap_lock:
+            fresh = await self._adopt_unlocked(stream_id, started_at)
+        if fresh:
             await self._remember_game()
-            await self._schedule_greeting(started, started)
+            asyncio.create_task(self._schedule_greeting(fresh[0], fresh[1]))
+
+    async def _adopt_unlocked(self, stream_id: str, started_at: str) -> tuple[str, str] | None:
+        stream_id = str(stream_id or "")
+        if not stream_id:
+            return None
+        if stream_id == self.live.stream_id:
+            if started_at and not self.live.started_at:
+                self.live.started_at = started_at
+                _save_live(self.live)
+            return None
+        if self.live.stream_id and not self.live.recapped:
+            await self._post_recap_unlocked()
+        self.live.begin(stream_id, started_at)
+        _save_live(self.live)
+        log.info("Nouveau live %s", stream_id)
+        return stream_id, started_at or self.live.started_at
 
     async def _on_stream_online(self, event: dict) -> None:
-        started = str(event.get("started_at") or "")
-        if started:
-            self.live.begin(started)
-            _save_live(self.live)
-            await self._remember_game()
-            await self._schedule_greeting(started, started)
+        await self._adopt_stream(str(event.get("id") or ""), str(event.get("started_at") or ""))
 
     async def _on_stream_offline(self) -> None:
-        if not self.live.started_at or self.live.recapped:
+        await self._recap_if_needed()
+
+    async def _recap_if_needed(self) -> None:
+        async with self._recap_lock:
+            await self._post_recap_unlocked()
+
+    async def _post_recap_unlocked(self) -> None:
+        if not self.live.stream_id or self.live.recapped or not self.live.started_at:
             return
+        ended = datetime.datetime.now(datetime.timezone.utc)
         token = os.environ.get("TWITCH_BROADCASTER_ACCESS_TOKEN", "")
         clips = []
         for clip_id in self.live.clip_ids:
@@ -828,7 +878,7 @@ class ZaelBot(commands.Bot):
                 clips.append(info)
             else:
                 clips.append({"id": clip_id, "view_count": 0, "url": clip_url(clip_id)})
-        text = build_recap(self.live, pick_top_clip(clips))
+        text = build_recap(self.live, pick_top_clip(clips), ended)
         channel_id = os.environ.get("DISCORD_RECAP_CHANNEL_ID") or DEFAULT_RECAP_CHANNEL_ID
         webhook_url = os.environ.get("DISCORD_RECAP_WEBHOOK_URL", "")
         status, _message_id = await asyncio.to_thread(

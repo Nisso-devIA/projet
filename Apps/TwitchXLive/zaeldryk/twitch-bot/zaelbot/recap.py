@@ -18,6 +18,7 @@ DEFAULT_RECAP_CHANNEL_ID = "1570024936565899357"
 class LiveStats:
     def __init__(self, raw: dict | None = None) -> None:
         raw = raw or {}
+        self.stream_id = str(raw.get("stream_id") or "")
         self.started_at = str(raw.get("started_at") or "")
         self.follows = int(raw.get("follows") or 0)
         self.subs = int(raw.get("subs") or 0)
@@ -28,9 +29,16 @@ class LiveStats:
         self.deaths = {str(key): int(value) for key, value in (raw.get("deaths") or {}).items()}
         self.recapped = bool(raw.get("recapped"))
 
-    def begin(self, started_at: str) -> None:
-        if started_at and started_at != self.started_at:
-            self.__init__({"started_at": started_at})
+    def begin(self, stream_id: str, started_at: str = "") -> None:
+        """Démarre un live. Le même id conserve les compteurs (redémarrage)."""
+        stream_id = str(stream_id or "")
+        if not stream_id:
+            return
+        if stream_id == self.stream_id:
+            if started_at and not self.started_at:
+                self.started_at = started_at
+            return
+        self.__init__({"stream_id": stream_id, "started_at": started_at})
 
     def add_chatter(self, login: str) -> None:
         key = (login or "").lower()
@@ -69,6 +77,7 @@ class LiveStats:
 
     def export(self) -> dict:
         return {
+            "stream_id": self.stream_id,
             "started_at": self.started_at,
             "follows": self.follows,
             "subs": self.subs,

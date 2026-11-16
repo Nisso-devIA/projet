@@ -126,10 +126,37 @@ class RecapTests(unittest.TestCase):
 
         self.assertEqual(deliver_recap(text, pauses=(0,)), (0, ""))
         again = LiveStats(stats.export())
-        again.begin("2026-11-11T18:00:00Z")
+        again.stream_id = "one"
+        again.begin("one", "2026-11-11T18:00:00Z")
         self.assertEqual(again.follows, 1)
-        again.begin("2026-11-12T18:00:00Z")
+        again.begin("two", "2026-11-12T18:00:00Z")
         self.assertEqual(again.follows, 0)
+        self.assertFalse(again.recapped)
+
+    def test_same_stream_id_survives_a_restart(self):
+        stats = LiveStats(
+            {
+                "stream_id": "9001",
+                "started_at": "2026-11-16T20:51:55Z",
+                "follows": 2,
+                "recapped": False,
+            }
+        )
+        stats.add_chatter("alice")
+        saved = LiveStats(stats.export())
+        saved.begin("9001", "2026-11-16T20:51:55Z")
+        self.assertEqual(saved.follows, 2)
+        self.assertEqual(saved.chatters.get("alice"), 1)
+        self.assertFalse(saved.recapped)
+        saved.recapped = True
+        reloaded = LiveStats(saved.export())
+        self.assertTrue(reloaded.recapped)
+        reloaded.begin("9001", "2026-11-16T20:51:55Z")
+        self.assertEqual(reloaded.follows, 2)
+        reloaded.begin("9002", "2026-11-16T20:51:55Z")
+        self.assertEqual(reloaded.follows, 0)
+        self.assertEqual(reloaded.stream_id, "9002")
+        self.assertFalse(reloaded.recapped)
 
     def test_examples_and_scopes(self):
         timer = json.loads((ROOT / "timers.example.json").read_text(encoding="utf-8"))
