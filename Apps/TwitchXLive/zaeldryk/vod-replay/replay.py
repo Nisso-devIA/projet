@@ -238,6 +238,18 @@ def helix_videos(client_id: str, token: str) -> list[dict]:
     return list(payload.get("data") or [])
 
 
+def helix_video(client_id: str, token: str, vod_id: str) -> dict | None:
+    query = urllib.parse.urlencode({"id": vod_id})
+    request = urllib.request.Request(
+        "https://api.twitch.tv/helix/videos?" + query,
+        headers={"Client-ID": client_id, "Authorization": "Bearer " + token},
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        payload = json.loads(response.read().decode())
+    rows = payload.get("data") or []
+    return rows[0] if rows else None
+
+
 def plain_token(value: str) -> str:
     token = (value or "").strip()
     if token.lower().startswith("oauth:"):
@@ -516,7 +528,7 @@ def plan(vod: dict) -> tuple[str, str, list[tuple[int, str]]]:
     return game, title_for(game, when), chapters
 
 
-def run(dry_run: bool) -> int:
+def run(dry_run: bool, vod_id: str = "") -> int:
     missing = missing_tools()
     if missing:
         for name in missing:
@@ -524,8 +536,14 @@ def run(dry_run: bool) -> int:
         return 1
     now = datetime.now(PARIS)
     client_id, token = twitch_credentials()
-    vods = helix_videos(client_id, token)
-    vod = select_evening_vod(vods, now)
+    if vod_id:
+        vod = helix_video(client_id, token, vod_id)
+        if vod is None:
+            log(f"VOD {vod_id} introuvable")
+            return 1
+    else:
+        vods = helix_videos(client_id, token)
+        vod = select_evening_vod(vods, now)
     if vod is not None and not (vod.get("game_name") or vod.get("category")):
         vod["game_name"] = channel_game(client_id, token)
     if vod is None:
@@ -637,9 +655,10 @@ def finish_public(youtube, journal: dict, vod_id: str, game: str, chapters: list
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--vod-id", default="")
     args = parser.parse_args()
     try:
-        return run(args.dry_run)
+        return run(args.dry_run, args.vod_id.strip())
     except Exception as exc:
         if "invalid_grant" in str(exc):
             log("YouTube auth invalid_grant — rien publié")
