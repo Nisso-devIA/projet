@@ -372,6 +372,15 @@ def frames_and_chapters(video: Path, duration_s: int, api_key: str, model: str) 
     return game[:60], chapters
 
 
+def missing_tools() -> list[str]:
+    """Outils requis pour télécharger et découper la VOD."""
+    missing = []
+    for name in ("yt-dlp", "ffmpeg"):
+        if shutil.which(name) is None:
+            missing.append(name)
+    return missing
+
+
 def download(vod_id: str, dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists() and dest.stat().st_size > 1_000_000:
@@ -508,6 +517,11 @@ def plan(vod: dict) -> tuple[str, str, list[tuple[int, str]]]:
 
 
 def run(dry_run: bool) -> int:
+    missing = missing_tools()
+    if missing:
+        for name in missing:
+            log(f"dépendance manquante : {name}")
+        return 1
     now = datetime.now(PARIS)
     client_id, token = twitch_credentials()
     vods = helix_videos(client_id, token)

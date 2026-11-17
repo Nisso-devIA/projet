@@ -69,6 +69,16 @@ class ReplayTests(unittest.TestCase):
         self.assertFalse(journal_done(data, "2"))
         self.assertFalse(journal_done({"vods": {"1": {"status": "uploading"}}}, "1"))
 
+    def test_missing_tools_lists_each_absent_command(self):
+        import replay
+
+        original = replay.shutil.which
+        replay.shutil.which = lambda name: None if name in {"yt-dlp", "ffmpeg"} else original(name)
+        try:
+            self.assertEqual(replay.missing_tools(), ["yt-dlp", "ffmpeg"])
+        finally:
+            replay.shutil.which = original
+
 
 if __name__ == "__main__":
     unittest.main()
