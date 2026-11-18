@@ -80,7 +80,12 @@ class StateTests(unittest.TestCase):
             "webhook_id": "99",
             "embeds": [{"title": "est en LIVE"}],
         }
+        friend = {
+            "author": {"id": "42", "bot": True},
+            "embeds": [{"title": "🔴 Belka_dz est en LIVE !"}],
+        }
         self.assertTrue(is_own_live_embed(own, "42"))
+        self.assertFalse(is_own_live_embed(friend, "42"))
         self.assertFalse(is_own_live_embed(other, "42"))
         self.assertFalse(is_own_live_embed(human, "42"))
         self.assertFalse(is_own_live_embed(webhook, "42"))
