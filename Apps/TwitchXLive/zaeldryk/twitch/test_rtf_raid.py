@@ -7,6 +7,7 @@ from rtf_raid import (
     manual_override,
     merge_env_text,
     parse_target,
+    raid_detail,
     requires_target_live,
     slot_line,
     user_on_line,
@@ -71,13 +72,23 @@ class ParseTests(unittest.TestCase):
         tonight = datetime(2026, 11, 16, 22, 50, tzinfo=PARIS)
         tomorrow = datetime(2026, 11, 17, 22, 50, tzinfo=PARIS)
         self.assertEqual(manual_override(tonight, env), ("mrkrakottefr", True))
-        self.assertEqual(manual_override(tomorrow, env), (None, True))
+        self.assertEqual(manual_override(tomorrow, env), (None, False))
+        day_before = datetime(2026, 11, 15, 22, 50, tzinfo=PARIS)
+        self.assertEqual(manual_override(day_before, env), (None, True))
         phrase = {"RTF_RAID_TARGET": "raid la rtf", "RTF_RAID_TARGET_DATE": "2026-11-18"}
         wednesday = datetime(2026, 11, 18, 22, 50, tzinfo=PARIS)
+        thursday = datetime(2026, 11, 19, 22, 50, tzinfo=PARIS)
         self.assertEqual(manual_override(wednesday, phrase), ("raidtwitchfamily", True))
-        self.assertFalse(requires_target_live("raidtwitchfamily"))
-        self.assertFalse(requires_target_live("raid la rtf"))
+        self.assertEqual(manual_override(thursday, phrase), (None, False))
+        self.assertTrue(requires_target_live("raidtwitchfamily"))
+        self.assertTrue(requires_target_live("raid la rtf"))
         self.assertTrue(requires_target_live("mrkrakottefr"))
+
+    def test_raid_detail_keeps_the_creation_time_or_the_error(self):
+        body = {"data": [{"created_at": "2026-11-18T22:00:01Z", "is_mature": False}]}
+        self.assertEqual(raid_detail(200, body), "créé 2026-11-18T22:00:01Z")
+        self.assertEqual(raid_detail(409, "The broadcaster is not streaming live."), "The broadcaster is not streaming live.")
+        self.assertEqual(raid_detail(200, {"data": []}), "sans données")
 
     def test_missing_manual_target_keeps_the_discord_path(self):
         moment = datetime(2026, 11, 16, 22, 50, tzinfo=PARIS)

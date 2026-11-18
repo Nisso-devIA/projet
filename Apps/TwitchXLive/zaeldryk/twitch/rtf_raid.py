@@ -103,9 +103,8 @@ def _clean_login(value: str) -> str:
 def manual_override(moment: datetime, env: dict | None = None) -> tuple[str | None, bool]:
     """Cible du jour, sans Discord.
 
-    Retourne (login ou None, mode manuel). Le mode manuel est actif dès qu'une
-    cible est configurée : une date autre que le jour Paris courant ne lance
-    pas de raid et ne lit pas Discord.
+    Retourne (login ou None, mode manuel). Une date future ne lance pas de raid
+    et ne lit pas Discord. Une date passée est ignorée : le planning reprend.
     """
     values = env if env is not None else load_env(RAID_ENV)
     login = _clean_login(values.get("RTF_RAID_TARGET", ""))
@@ -117,13 +116,23 @@ def manual_override(moment: datetime, env: dict | None = None) -> tuple[str | No
     if not login:
         return None, False
     if day != moment.date().isoformat():
+        try:
+            configured = datetime.fromisoformat(day).date()
+        except ValueError:
+            return None, True
+        if configured < moment.date():
+            return None, False
         return None, True
     return login, True
 
 
+def is_house(login: str) -> bool:
+    return _clean_login(login) == HOUSE_LOGIN
+
+
 def requires_target_live(login: str) -> bool:
-    """raidtwitchfamily peut être hors live. Les autres cibles doivent l'être."""
-    return _clean_login(login) != HOUSE_LOGIN
+    """Twitch répond 200 même si la cible est hors live, puis n'envoie personne."""
+    return True
 
 
 def dry_run(forced: bool = False) -> bool:
@@ -460,30 +469,93 @@ def prepare(token: str, when: datetime | None = None) -> dict:
     return state
 
 
+def raid_detail(status: int, payload) -> str:
+    """Résumé Helix sans jeton : heure de création, ou le message d'erreur."""
+    if isinstance(payload, dict):
+        rows = payload.get("data") or []
+        if status in (200, 202) and rows and rows[0].get("created_at"):
+            return "créé " + str(rows[0]["created_at"])
+        message = payload.get("message") or "sans données"
+        return str(message)[:120]
+    if isinstance(payload, str) and payload:
+        return payload[:120]
+    return "sans corps"
+
+
 def start_raid(to_id: str) -> tuple[int, str]:
     status, payload = helix(
         "POST",
         "/raids",
         {"from_broadcaster_id": BROADCASTER_ID, "to_broadcaster_id": to_id},
     )
-    if isinstance(payload, dict):
-        return status, "ok" if status in (200, 202) else "refus"
-    return status, "refus"
+    return status, raid_detail(status, payload)
+
+
+def token_can_raid() -> bool:
+    try:
+        payload = validate_token()
+    except Exception:
+        return False
+    return has_raid_scope(payload) and str(payload.get("user_id") or "") == BROADCASTER_ID
+
+
+def ensure_raid_token() -> None:
+    """Ne tourne le jeton que s'il n'a plus le droit de raid."""
+    if token_can_raid():
+        return
+    refresh_broadcaster()
+
+
+def wait_until_target_live(login: str) -> bool:
+    """La maison RTF a jusqu'à 23:08 Paris. Les autres cibles sont testées une fois."""
+    if stream_live(login):
+        return True
+    if not is_house(login):
+        return False
+    import time
+
+    deadline = datetime.now(PARIS).replace(hour=23, minute=8, second=0, microsecond=0)
+    if datetime.now(PARIS) >= deadline:
+        return False
+    log(f"{login} hors live, attente jusqu'à 23:08 Paris")
+    while datetime.now(PARIS) < deadline:
+        time.sleep(15)
+        if stream_live(login):
+            log(f"{login} est en live")
+            return True
+    return False
+
+
+def confirm_raid_left(login: str) -> bool:
+    """Un raid abouti coupe le live. 95 s couvrent le décompte Twitch de 90 s."""
+    import time
+
+    time.sleep(95)
+    if stream_live(FROM_LOGIN):
+        log(f"raid non parti : zaeldryk toujours en live après le décompte vers {login}")
+        return False
+    log(f"raid confirmé : zaeldryk n'est plus en live, viewers partis vers {login}")
+    return True
 
 
 def fire(token: str, forced_dry: bool = False) -> int:
-    refresh_broadcaster()
+    ensure_raid_token()
     state_path_data = prepare(token)
     login = state_path_data.get("twitch_login")
     if not login:
         log("pas de cible, pas de raid")
         return 0
-    if requires_target_live(login):
-        if not stream_live(login):
-            log(f"{login} hors live, pas de raid")
-            return 0
-    else:
-        log(f"{login} : cible maison, le raid part même hors live")
+    if is_house(login) and not forced_dry:
+        import time
+
+        gap = (fire_instant(datetime.now(PARIS), login) - datetime.now(PARIS)).total_seconds()
+        if 0 < gap <= 90:
+            time.sleep(gap)
+        log(f"{login} : raid à 23:00:00, uniquement si la cible est en live")
+    target_live = stream_live(login) if forced_dry else wait_until_target_live(login)
+    if not target_live:
+        log(f"{login} hors live, pas de raid : Twitch accepterait le POST puis n'enverrait personne")
+        return 0
     if not stream_live(FROM_LOGIN):
         log(f"zaeldryk hors live, pas de raid vers {login}")
         return 0
@@ -500,14 +572,16 @@ def fire(token: str, forced_dry: bool = False) -> int:
     if not to_id:
         log(f"{login} introuvable sur Twitch, pas de raid")
         return 0
-    status, _ = start_raid(to_id)
-    log(f"raid zaeldryk -> {login} HTTP {status}")
-    return 0 if status in (200, 202) else 1
+    status, detail = start_raid(to_id)
+    log(f"raid zaeldryk -> {login} HTTP {status} {detail}")
+    if status not in (200, 202):
+        return 1
+    return 0 if confirm_raid_left(login) else 1
 
 
 def fire_instant(moment: datetime, login: str | None) -> datetime:
     """23:00:00 pile pour raidtwitchfamily, 22:59:30 pour les autres."""
-    if login and not requires_target_live(login):
+    if login and is_house(login):
         return moment.replace(hour=23, minute=0, second=0, microsecond=0)
     return moment.replace(hour=22, minute=59, second=30, microsecond=0)
 
@@ -516,7 +590,7 @@ def wait_until_fire(moment: datetime, login: str | None = None) -> datetime | No
     """Attend l'instant de raid seulement si on est déjà dans la dernière minute."""
     target = fire_instant(moment, login)
     delta = (target - moment).total_seconds()
-    limit = 5 if login and not requires_target_live(login) else 90
+    limit = 5 if login and is_house(login) else 90
     if 0 < delta <= limit:
         import time
 
@@ -547,6 +621,8 @@ def main() -> int:
     if args.fire and not args.dry_run:
         now = wait_until_fire(now, preview)
         if now is None:
+            if preview and is_house(preview):
+                log(f"{preview} : passage trop tôt, le raid est à 23:00:00")
             return 0
     _login, manual = manual_override(now)
     token = "" if manual else load_env(DISCORD_USER_ENV).get("DISCORD_USER_TOKEN", "")
