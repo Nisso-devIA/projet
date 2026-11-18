@@ -38,6 +38,7 @@ TOKEN_LOCK = Path(
 BROADCASTER_ID = "426411773"
 _CACHED_ACCESS = ""
 FROM_LOGIN = "zaeldryk"
+HOUSE_LOGIN = "raidtwitchfamily"
 GUILD_ID = "935417890654547989"
 
 DAYS = {
@@ -118,6 +119,11 @@ def manual_override(moment: datetime, env: dict | None = None) -> tuple[str | No
     if day != moment.date().isoformat():
         return None, True
     return login, True
+
+
+def requires_target_live(login: str) -> bool:
+    """raidtwitchfamily peut être hors live. Les autres cibles doivent l'être."""
+    return _clean_login(login) != HOUSE_LOGIN
 
 
 def dry_run(forced: bool = False) -> bool:
@@ -472,13 +478,14 @@ def fire(token: str, forced_dry: bool = False) -> int:
     if not login:
         log("pas de cible, pas de raid")
         return 0
-    zael_live = stream_live(FROM_LOGIN)
-    target_live = stream_live(login)
-    if not zael_live:
+    if requires_target_live(login):
+        if not stream_live(login):
+            log(f"{login} hors live, pas de raid")
+            return 0
+    else:
+        log(f"{login} : cible maison, le raid part même hors live")
+    if not stream_live(FROM_LOGIN):
         log(f"zaeldryk hors live, pas de raid vers {login}")
-        return 0
-    if not target_live:
-        log(f"{login} hors live, pas de raid")
         return 0
     armed = enabled() and has_raid_scope() and not dry_run(forced_dry)
     if not armed:
@@ -498,11 +505,19 @@ def fire(token: str, forced_dry: bool = False) -> int:
     return 0 if status in (200, 202) else 1
 
 
-def wait_until_fire(moment: datetime) -> datetime | None:
-    """Sleep until 22:59:30 Europe/Paris if we are already in that minute."""
-    target = moment.replace(hour=22, minute=59, second=30, microsecond=0)
+def fire_instant(moment: datetime, login: str | None) -> datetime:
+    """23:00:00 pile pour raidtwitchfamily, 22:59:30 pour les autres."""
+    if login and not requires_target_live(login):
+        return moment.replace(hour=23, minute=0, second=0, microsecond=0)
+    return moment.replace(hour=22, minute=59, second=30, microsecond=0)
+
+
+def wait_until_fire(moment: datetime, login: str | None = None) -> datetime | None:
+    """Attend l'instant de raid seulement si on est déjà dans la dernière minute."""
+    target = fire_instant(moment, login)
     delta = (target - moment).total_seconds()
-    if 0 < delta <= 90:
+    limit = 5 if login and not requires_target_live(login) else 90
+    if 0 < delta <= limit:
         import time
 
         time.sleep(delta)
@@ -528,8 +543,9 @@ def main() -> int:
     now = datetime.now(PARIS)
     if not args.dry_run and args.prepare and not args.fire and not due("prepare", now):
         return 0
+    preview, _preview_manual = manual_override(now)
     if args.fire and not args.dry_run:
-        now = wait_until_fire(now)
+        now = wait_until_fire(now, preview)
         if now is None:
             return 0
     _login, manual = manual_override(now)

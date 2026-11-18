@@ -7,6 +7,7 @@ from rtf_raid import (
     manual_override,
     merge_env_text,
     parse_target,
+    requires_target_live,
     slot_line,
     user_on_line,
     wait_until_fire,
@@ -74,16 +75,23 @@ class ParseTests(unittest.TestCase):
         phrase = {"RTF_RAID_TARGET": "raid la rtf", "RTF_RAID_TARGET_DATE": "2026-11-18"}
         wednesday = datetime(2026, 11, 18, 22, 50, tzinfo=PARIS)
         self.assertEqual(manual_override(wednesday, phrase), ("raidtwitchfamily", True))
+        self.assertFalse(requires_target_live("raidtwitchfamily"))
+        self.assertFalse(requires_target_live("raid la rtf"))
+        self.assertTrue(requires_target_live("mrkrakottefr"))
 
     def test_missing_manual_target_keeps_the_discord_path(self):
         moment = datetime(2026, 11, 16, 22, 50, tzinfo=PARIS)
         self.assertEqual(manual_override(moment, {}), (None, False))
 
-    def test_fire_only_waits_near_225930(self):
+    def test_fire_only_waits_near_the_right_instant(self):
         morning = datetime(2026, 11, 12, 12, 0, tzinfo=PARIS)
-        self.assertIsNone(wait_until_fire(morning))
+        self.assertIsNone(wait_until_fire(morning, "someone"))
         just_after = datetime(2026, 11, 12, 22, 59, 40, tzinfo=PARIS)
-        self.assertEqual(wait_until_fire(just_after), just_after)
+        self.assertEqual(wait_until_fire(just_after, "someone"), just_after)
+        house_early = datetime(2026, 11, 18, 22, 59, 0, tzinfo=PARIS)
+        self.assertIsNone(wait_until_fire(house_early, "raidtwitchfamily"))
+        house_on_time = datetime(2026, 11, 18, 23, 0, 2, tzinfo=PARIS)
+        self.assertEqual(wait_until_fire(house_on_time, "raidtwitchfamily"), house_on_time)
 
 
 if __name__ == "__main__":
