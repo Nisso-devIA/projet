@@ -9,6 +9,7 @@ from rtf_raid import (
     parse_target,
     raid_already_sent,
     raid_detail,
+    raid_notice,
     requires_target_live,
     slot_line,
     user_on_line,
@@ -90,6 +91,28 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(raid_detail(200, body), "créé 2026-11-18T22:00:01Z")
         self.assertEqual(raid_detail(409, "The broadcaster is not streaming live."), "The broadcaster is not streaming live.")
         self.assertEqual(raid_detail(200, {"data": []}), "sans données")
+
+    def test_outgoing_raid_notice_matches_only_our_target(self):
+        def message(to_id):
+            return {
+                "metadata": {"message_type": "notification"},
+                "payload": {
+                    "subscription": {"type": "channel.raid"},
+                    "event": {
+                        "from_broadcaster_user_id": "426411773",
+                        "to_broadcaster_user_id": to_id,
+                        "to_broadcaster_user_login": "raidtwitchfamily",
+                        "viewers": 12,
+                    },
+                },
+            }
+
+        self.assertEqual(raid_notice(message("791896111"), "791896111"), "ok")
+        self.assertEqual(raid_notice(message("999"), "791896111"), "autre")
+        incoming = message("426411773")
+        incoming["payload"]["event"]["from_broadcaster_user_id"] = "1"
+        self.assertIsNone(raid_notice(incoming, "791896111"))
+        self.assertIsNone(raid_notice({"metadata": {"message_type": "session_keepalive"}}, "791896111"))
 
     def test_a_raid_is_not_sent_twice_the_same_day(self):
         moment = datetime(2026, 11, 19, 23, 0, tzinfo=PARIS)

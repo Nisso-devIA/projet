@@ -36,6 +36,8 @@ TOKEN_LOCK = Path(
     os.environ.get("TWITCH_BROADCASTER_LOCK", ROOT / "twitch-bot" / ".broadcaster-token.lock")
 )
 BROADCASTER_ID = "426411773"
+EVENTSUB_URL = "wss://eventsub.wss.twitch.tv/ws?keepalive_timeout_seconds=30"
+RAID_CONFIRM_SECONDS = 100
 _CACHED_ACCESS = ""
 FROM_LOGIN = "zaeldryk"
 HOUSE_LOGIN = "raidtwitchfamily"
@@ -525,16 +527,114 @@ def ensure_raid_token() -> None:
     refresh_broadcaster()
 
 
-def confirm_raid_left(login: str) -> bool:
-    """Un raid abouti coupe le live. 95 s couvrent le décompte Twitch de 90 s."""
+def raid_notice(message: dict, to_id: str) -> str | None:
+    """'ok' si ce message EventSub est notre raid vers to_id, 'autre' sinon, None si hors sujet."""
+    if (message.get("metadata") or {}).get("message_type") != "notification":
+        return None
+    payload = message.get("payload") or {}
+    if (payload.get("subscription") or {}).get("type") != "channel.raid":
+        return None
+    event = payload.get("event") or {}
+    if str(event.get("from_broadcaster_user_id") or "") != BROADCASTER_ID:
+        return None
+    if str(event.get("to_broadcaster_user_id") or "") != str(to_id):
+        return "autre"
+    return "ok"
+
+
+def raid_target_text(message: dict) -> str:
+    event = ((message.get("payload") or {}).get("event") or {})
+    login = event.get("to_broadcaster_user_login") or "?"
+    viewers = event.get("viewers")
+    return f"{login} ({viewers} viewers)"
+
+
+def subscribe_outgoing_raid(session_id: str) -> tuple[int, str]:
+    status, payload = http_json(
+        "POST",
+        "https://api.twitch.tv/helix/eventsub/subscriptions",
+        {
+            "Client-ID": client_id(),
+            "Authorization": "Bearer " + twitch_token(),
+            "Content-Type": "application/json",
+        },
+        {
+            "type": "channel.raid",
+            "version": "1",
+            "condition": {"from_broadcaster_user_id": BROADCASTER_ID},
+            "transport": {"method": "websocket", "session_id": session_id},
+        },
+    )
+    if status == 202:
+        return status, "écoute posée"
+    if isinstance(payload, dict):
+        return status, str(payload.get("message") or "refus")[:120]
+    return status, str(payload or "sans corps")[:120]
+
+
+def confirm_outgoing_raid(to_id: str) -> bool:
+    """Attend l'événement channel.raid sortant. Le live de zaeldryk continue après un raid."""
     import time
 
-    time.sleep(95)
-    if stream_live(FROM_LOGIN):
-        log(f"échec : zaeldryk toujours en live 95 s après le POST vers {login}. Le décompte Twitch n'a pas abouti.")
+    try:
+        import websocket
+    except ImportError:
+        log("échec : module websocket absent, raid non confirmé")
         return False
-    log(f"raid confirmé : zaeldryk n'est plus en live, viewers partis vers {login}")
-    return True
+    try:
+        conn = websocket.create_connection(EVENTSUB_URL, timeout=20)
+    except Exception as exc:
+        log(f"échec : EventSub injoignable ({type(exc).__name__})")
+        return False
+    conn.settimeout(1)
+    deadline = time.time() + RAID_CONFIRM_SECONDS
+    subscribed = False
+    try:
+        while time.time() < deadline:
+            try:
+                raw = conn.recv()
+            except websocket.WebSocketTimeoutException:
+                continue
+            except Exception as exc:
+                log(f"échec : EventSub coupé ({type(exc).__name__})")
+                return False
+            message = json.loads(raw)
+            kind = (message.get("metadata") or {}).get("message_type")
+            if kind == "session_welcome" and not subscribed:
+                session_id = str(((message.get("payload") or {}).get("session") or {}).get("id") or "")
+                status, detail = subscribe_outgoing_raid(session_id)
+                subscribed = True
+                if status != 202:
+                    log(f"échec : écoute channel.raid refusée HTTP {status} {detail}")
+                    return False
+                log("écoute channel.raid sortant posée")
+                continue
+            if kind == "session_reconnect":
+                url = str(((message.get("payload") or {}).get("session") or {}).get("reconnect_url") or "")
+                if url:
+                    conn.close()
+                    conn = websocket.create_connection(url, timeout=20)
+                    conn.settimeout(1)
+                continue
+            if kind == "revocation":
+                log("échec : écoute channel.raid révoquée")
+                return False
+            notice = raid_notice(message, to_id)
+            if notice == "ok":
+                log(f"raid confirmé : {raid_target_text(message)}")
+                return True
+            if notice == "autre":
+                log(f"raid sortant vers une autre chaîne : {raid_target_text(message)}")
+        if not subscribed:
+            log("échec : pas de session EventSub")
+            return False
+        log(f"échec : aucun channel.raid sortant après {RAID_CONFIRM_SECONDS} s")
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def fire(token: str, forced_dry: bool = False) -> int:
@@ -585,7 +685,7 @@ def fire(token: str, forced_dry: bool = False) -> int:
     if status not in (200, 202):
         return 1
     mark_raid_sent(datetime.now(PARIS))
-    return 0 if confirm_raid_left(login) else 1
+    return 0 if confirm_outgoing_raid(to_id) else 1
 
 
 def fire_instant(moment: datetime, login: str | None) -> datetime:
