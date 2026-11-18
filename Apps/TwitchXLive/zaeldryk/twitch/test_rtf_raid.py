@@ -71,6 +71,9 @@ class ParseTests(unittest.TestCase):
         tomorrow = datetime(2026, 11, 17, 22, 50, tzinfo=PARIS)
         self.assertEqual(manual_override(tonight, env), ("mrkrakottefr", True))
         self.assertEqual(manual_override(tomorrow, env), (None, True))
+        phrase = {"RTF_RAID_TARGET": "raid la rtf", "RTF_RAID_TARGET_DATE": "2026-11-18"}
+        wednesday = datetime(2026, 11, 18, 22, 50, tzinfo=PARIS)
+        self.assertEqual(manual_override(wednesday, phrase), ("raidtwitchfamily", True))
 
     def test_missing_manual_target_keeps_the_discord_path(self):
         moment = datetime(2026, 11, 16, 22, 50, tzinfo=PARIS)

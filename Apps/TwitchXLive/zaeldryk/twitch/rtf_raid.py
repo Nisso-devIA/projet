@@ -92,7 +92,11 @@ def enabled() -> bool:
 
 
 def _clean_login(value: str) -> str:
-    return (value or "").strip().lstrip("@").lower()
+    login = (value or "").strip().lstrip("@").lower()
+    folded = " ".join(login.replace("-", " ").split())
+    if folded in {"raid la rtf", "la rtf"}:
+        return "raidtwitchfamily"
+    return login
 
 
 def manual_override(moment: datetime, env: dict | None = None) -> tuple[str | None, bool]:
