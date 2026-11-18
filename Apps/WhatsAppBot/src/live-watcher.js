@@ -1,7 +1,20 @@
 import { existsSync, readFileSync } from "node:fs";
 import { config } from "./config.js";
-import { getLastPostedKind, postEndStory, postLiveStory } from "./status-post.js";
+import { getLastPostedKind, postEndStory, postLiveStory, scheduleStatusRetry } from "./status-post.js";
 import { fetchTwitchStreamMode } from "./twitch-live.js";
+
+let timer = null;
+let active = 0;
+
+export function activeWatcherCount() {
+  return active;
+}
+
+export function stopLiveWatcher() {
+  if (timer) clearInterval(timer);
+  timer = null;
+  active = 0;
+}
 
 /**
  * Stories live basées sur un VRAI live Twitch :
@@ -9,21 +22,24 @@ import { fetchTwitchStreamMode } from "./twitch-live.js";
  * - titre SANS mots-clés offline/ending/brb/fin de live/hors ligne
  * Le faux live (titre offline) = mode ending → jamais de story "en live".
  */
-export function startLiveWatcher(sock) {
-  const la = config.liveAnnounce;
+export function startLiveWatcher(sock, deps = {}) {
+  stopLiveWatcher();
+  const la = deps.liveAnnounce || config.liveAnnounce;
   if (!la?.enabled) {
     console.log("Live watcher désactivé (liveAnnounce.enabled = false)");
     return;
   }
 
   const modeFile = la.modeFile;
-  if (!modeFile || !existsSync(modeFile)) {
+  if (!deps.force && (!modeFile || !existsSync(modeFile))) {
     console.log(`Live watcher désactivé (fichier absent : ${modeFile || "?"})`);
     return;
   }
 
   const confirmPolls = Math.max(2, Number(la.confirmPolls || 4));
-  let lastMode = normalizeMode(readMode(modeFile));
+  const read = deps.readMode || (() => readMode(modeFile));
+  const fetchMode = deps.fetchMode || fetchTwitchStreamMode;
+  let lastMode = normalizeMode(read());
   let liveStreak = 0;
   let announcedLive = false;
   let sawFakeOrOffline = isFakeOrOffline(lastMode);
@@ -38,16 +54,16 @@ export function startLiveWatcher(sock) {
     `Live watcher actif (mode=${lastMode}, confirm=${confirmPolls}, vérif titre offline, announcedLive=${announcedLive})`
   );
 
-  setInterval(async () => {
+  timer = setInterval(async () => {
     if (posting) return;
     try {
-      const fileMode = normalizeMode(readMode(modeFile));
+      const fileMode = normalizeMode(read());
       let mode = fileMode;
       let title = "";
 
       // Double check Helix + titre (texte offline = faux live)
       try {
-        const helix = await fetchTwitchStreamMode();
+        const helix = await fetchMode();
         if (helix.ok && helix.mode) {
           mode = helix.mode;
           title = helix.title || "";
@@ -77,11 +93,16 @@ export function startLiveWatcher(sock) {
       ) {
         posting = true;
         try {
-          await postLiveStory(sock, title);
+          const info = await postLiveStory(sock, title);
           announcedLive = true;
+          const outcome = info?.acked ? "confirmée" : "non confirmée";
           console.log(
-            `Story LIVE publiée (vrai live confirmé ${confirmPolls}×, titre="${truncate(title)}")`
+            `Story LIVE ${outcome} (vrai live confirmé ${confirmPolls}×, titre="${truncate(title)}")`
           );
+        } catch (err) {
+          announcedLive = true;
+          scheduleStatusRetry("live", title);
+          console.error("Live watcher :", err.message);
         } finally {
           posting = false;
         }
@@ -104,11 +125,16 @@ export function startLiveWatcher(sock) {
       ) {
         posting = true;
         try {
-          await postEndStory(sock);
+          const info = await postEndStory(sock);
           announcedLive = false;
+          const outcome = info?.acked ? "confirmée" : "non confirmée";
           console.log(
-            `Story FIN DE LIVE publiée (raison=${mode}${title ? `, titre="${truncate(title)}"` : ""})`
+            `Story FIN DE LIVE ${outcome} (raison=${mode}${title ? `, titre="${truncate(title)}"` : ""})`
           );
+        } catch (err) {
+          announcedLive = false;
+          scheduleStatusRetry("end", "");
+          console.error("Live watcher :", err.message);
         } finally {
           posting = false;
         }
@@ -118,6 +144,8 @@ export function startLiveWatcher(sock) {
       console.error("Live watcher :", err.message);
     }
   }, (la.pollSeconds || 15) * 1000);
+  active = 1;
+  timer.unref?.();
 }
 
 function isFakeOrOffline(mode) {

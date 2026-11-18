@@ -1,0 +1,31 @@
+"""Payload for the #📖-règlement message. The banner is the message attachment, above the embed."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+BANNER_FILENAME = "reglement-banner.jpg"
+BANNER_PATH = Path("/home/ubuntu/zaeldryk/discord/assets") / BANNER_FILENAME
+RULES_COLOR = 15844367
+RULES_DESCRIPTION = (
+    "1. Respecte tous les membres — aucune insulte, harcèlement ou discrimination\n"
+    "2. Pas de spam, flood ou publicité sans autorisation\n"
+    "3. Pas de contenu NSFW / choquant\n"
+    "4. Les liens sont réservés au staff\n"
+    "5. Pas de spoilers hors des salons prévus\n"
+    "6. Respecte les salons et les décisions des Sentinelles\n"
+    "7. Respecte les [conditions d’utilisation de Discord](https://discord.com/terms)\n"
+    "8. Amuse-toi et reste dans l’esprit de la communauté\n"
+    "\n"
+    "⚔️ En restant ici, tu acceptes ces règles.\n"
+    "Le non-respect peut entraîner un timeout ou un bannissement."
+)
+RULES_FOOTER = "Clique sur le bouton pour rejoindre la communauté"
+
+
+def rules_embed_dict() -> dict:
+    return {
+        "description": RULES_DESCRIPTION,
+        "color": RULES_COLOR,
+        "footer": {"text": RULES_FOOTER},
+    }

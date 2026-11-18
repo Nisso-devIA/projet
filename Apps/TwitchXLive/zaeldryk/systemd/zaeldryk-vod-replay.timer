@@ -1,0 +1,11 @@
+[Unit]
+Description=Rediffusion YouTube mardi, jeudi, samedi et dimanche à 11:00 Europe/Paris
+
+[Timer]
+OnCalendar=Tue,Thu,Sat,Sun *-*-* 11:00:00 Europe/Paris
+AccuracySec=1min
+Persistent=false
+Unit=zaeldryk-vod-replay.service
+
+[Install]
+WantedBy=timers.target

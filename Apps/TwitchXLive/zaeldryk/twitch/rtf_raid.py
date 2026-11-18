@@ -1,0 +1,749 @@
+#!/usr/bin/env python3
+"""Raid Twitch automatique vers la tranche 23h-00h du planning RTF.
+
+Lecture Discord en lecture seule, sauf si RTF_RAID_TARGET et
+RTF_RAID_TARGET_DATE sont le jour Europe/Paris : aucune lecture Discord.
+Aucun message Discord. Le POST /raids n'est fait que si RTF_RAID_ENABLED=1
+et RTF_RAID_DRY_RUN=0.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import os
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+PARIS = ZoneInfo("Europe/Paris")
+ROOT = Path(os.environ.get("ZAEL_ROOT", "/home/ubuntu/zaeldryk"))
+RAID_ENV = ROOT / "config" / "rtf-raid.env"
+DISCORD_USER_ENV = Path(
+    os.environ.get("RTF_DISCORD_ENV", "/home/ubuntu/autobump/bump.env")
+)
+MAP_PATH = Path(os.environ.get("RTF_MAP", ROOT / "config" / "rtf-twitch-map.json"))
+STATE_PATH = ROOT / "state" / "rtf-raid.json"
+TARGET_PATH = ROOT / "config" / "rtf-raid-target.json"
+LOG_PATH = ROOT / "logs" / "rtf-raid.log"
+BOT_ENV = Path(os.environ.get("TWITCH_BOT_ENV", ROOT / "twitch-bot" / ".env"))
+TOKEN_LOCK = Path(
+    os.environ.get("TWITCH_BROADCASTER_LOCK", ROOT / "twitch-bot" / ".broadcaster-token.lock")
+)
+BROADCASTER_ID = "426411773"
+EVENTSUB_URL = "wss://eventsub.wss.twitch.tv/ws?keepalive_timeout_seconds=30"
+RAID_CONFIRM_SECONDS = 100
+_CACHED_ACCESS = ""
+FROM_LOGIN = "zaeldryk"
+HOUSE_LOGIN = "raidtwitchfamily"
+GUILD_ID = "935417890654547989"
+
+DAYS = {
+    0: ("lundi", "935435092732551168"),
+    1: ("mardi", "935435128803573810"),
+    2: ("mercredi", "935435168859189258"),
+    3: ("jeudi", "935435201029505054"),
+    4: ("vendredi", "935435251797344316"),
+    5: ("samedi", "1462488655690993714"),
+    6: ("dimanche", "935435311377416232"),
+}
+
+SLOT_RE = re.compile(r"(\d{1,2})\s*h\s*[-–]\s*(\d{1,2})\s*h", re.IGNORECASE)
+MENTION_RE = re.compile(r"<@!?(\d+)>")
+RAID_SCOPE = "channel:manage:raids"
+KEEP_SCOPES = [
+    "chat:read",
+    "chat:edit",
+    "channel:manage:broadcast",
+    "channel:manage:videos",
+    "moderator:manage:chat_messages",
+    "moderator:read:followers",
+    "user:write:chat",
+    RAID_SCOPE,
+]
+
+
+def log(message: str) -> None:
+    stamp = datetime.now(PARIS).strftime("%Y-%m-%d %H:%M:%S")
+    line = f"{stamp} Europe/Paris {message}"
+    print(line)
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with LOG_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
+
+
+def load_env(path: Path) -> dict:
+    values = {}
+    if not path.exists():
+        return values
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def enabled() -> bool:
+    return load_env(RAID_ENV).get("RTF_RAID_ENABLED", "0") == "1"
+
+
+def _clean_login(value: str) -> str:
+    login = (value or "").strip().lstrip("@").lower()
+    folded = " ".join(login.replace("-", " ").split())
+    if folded in {"raid la rtf", "la rtf"}:
+        return "raidtwitchfamily"
+    return login
+
+
+def manual_override(moment: datetime, env: dict | None = None) -> tuple[str | None, bool]:
+    """Cible du jour, sans Discord.
+
+    Retourne (login ou None, mode manuel). Une date future ne lance pas de raid
+    et ne lit pas Discord. Une date passée est ignorée : le planning reprend.
+    """
+    values = env if env is not None else load_env(RAID_ENV)
+    login = _clean_login(values.get("RTF_RAID_TARGET", ""))
+    day = (values.get("RTF_RAID_TARGET_DATE") or "").strip()
+    if not login and env is None and TARGET_PATH.exists():
+        data = json.loads(TARGET_PATH.read_text(encoding="utf-8"))
+        login = _clean_login(str(data.get("login") or ""))
+        day = str(data.get("date") or "").strip()
+    if not login:
+        return None, False
+    if day != moment.date().isoformat():
+        try:
+            configured = datetime.fromisoformat(day).date()
+        except ValueError:
+            return None, True
+        if configured < moment.date():
+            return None, False
+        return None, True
+    return login, True
+
+
+def is_house(login: str) -> bool:
+    return _clean_login(login) == HOUSE_LOGIN
+
+
+def requires_target_live(login: str) -> bool:
+    """raidtwitchfamily est toujours hors live. Les autres cibles doivent l'être."""
+    return not is_house(login)
+
+
+def dry_run(forced: bool = False) -> bool:
+    if forced:
+        return True
+    return load_env(RAID_ENV).get("RTF_RAID_DRY_RUN", "1") != "0"
+
+
+def load_map() -> dict:
+    if not MAP_PATH.exists():
+        return {}
+    data = json.loads(MAP_PATH.read_text(encoding="utf-8"))
+    return {str(key): str(value).strip().lower() for key, value in data.items()}
+
+
+def is_grid(content: str) -> bool:
+    return len(SLOT_RE.findall(content or "")) >= 3
+
+
+def slot_line(content: str, start_hour: int = 23, end_hour: int = 0) -> str | None:
+    for line in (content or "").splitlines():
+        match = SLOT_RE.search(line)
+        if not match:
+            continue
+        if int(match.group(1)) == start_hour and int(match.group(2)) == end_hour:
+            return line
+    return None
+
+
+def user_on_line(line: str | None) -> str | None:
+    if not line:
+        return None
+    if "annulation" in line.lower():
+        return None
+    found = MENTION_RE.findall(line)
+    return found[-1] if found else None
+
+
+def parse_target(messages: list[dict]) -> str | None:
+    """Discord user id for 23h-00h, after the latest grid and later corrections."""
+    ordered = sorted(messages, key=lambda item: item.get("timestamp") or "")
+    grids = [item for item in ordered if is_grid(item.get("content") or "")]
+    if not grids:
+        return None
+    grid = grids[-1]
+    target = user_on_line(slot_line(grid.get("content") or ""))
+    for item in ordered:
+        if (item.get("timestamp") or "") <= (grid.get("timestamp") or ""):
+            continue
+        content = item.get("content") or ""
+        line = slot_line(content)
+        if line is None:
+            continue
+        if "annulation" in content.lower() or "annulation" in line.lower():
+            target = None
+            continue
+        target = user_on_line(line)
+    return target
+
+
+def discord_headers(token: str) -> dict:
+    return {
+        "Authorization": token,
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+    }
+
+
+def http_json(method: str, url: str, headers: dict, body: dict | None = None):
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            raw = response.read()
+            return response.status, json.loads(raw) if raw else None
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:180]
+        return exc.code, detail
+
+
+def read_day_messages(token: str, channel_id: str) -> list[dict]:
+    status, payload = http_json(
+        "GET",
+        f"https://discord.com/api/v10/channels/{channel_id}/messages?limit=15",
+        discord_headers(token),
+    )
+    if status != 200 or not isinstance(payload, list):
+        raise RuntimeError(f"lecture planning HTTP {status}")
+    return payload
+
+
+def merge_env_text(text: str, updates: dict) -> str:
+    lines = text.splitlines()
+    seen = set()
+    out = []
+    for line in lines:
+        key = line.split("=", 1)[0] if "=" in line else ""
+        if key in updates:
+            out.append(f"{key}={updates[key]}")
+            seen.add(key)
+        else:
+            out.append(line)
+    for key, value in updates.items():
+        if key not in seen:
+            out.append(f"{key}={value}")
+    return "\n".join(out) + "\n"
+
+
+def _write_bot_env(updates: dict) -> None:
+    BOT_ENV.write_text(merge_env_text(BOT_ENV.read_text(encoding="utf-8"), updates), encoding="utf-8")
+    os.chmod(BOT_ENV, 0o600)
+
+
+def _lock_file():
+    TOKEN_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    handle = TOKEN_LOCK.open("a+")
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    return handle
+
+
+def _unlock_file(handle) -> None:
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    handle.close()
+
+
+def _plain_token(value: str) -> str:
+    token = (value or "").strip()
+    if token.startswith("oauth:"):
+        return token.split(":", 1)[1]
+    return token
+
+
+def twitch_token() -> str:
+    """Jeton d'accès broadcaster. Relit le .env du bot, sauf si ce processus vient de le rafraîchir."""
+    if _CACHED_ACCESS:
+        return _CACHED_ACCESS
+    return _plain_token(load_env(BOT_ENV).get("TWITCH_BROADCASTER_ACCESS_TOKEN", ""))
+
+
+def refresh_broadcaster() -> str:
+    """Relit le .env sous le verrou partagé avec le bot, puis rafraîchit une fois."""
+    global _CACHED_ACCESS
+    handle = _lock_file()
+    try:
+        values = load_env(BOT_ENV)
+        current = _plain_token(values.get("TWITCH_BROADCASTER_ACCESS_TOKEN", ""))
+        refresh_value = values.get("TWITCH_BROADCASTER_REFRESH_TOKEN", "")
+        cid = values.get("TWITCH_CLIENT_ID", "")
+        secret = values.get("TWITCH_CLIENT_SECRET", "")
+        if not refresh_value or not cid or not secret:
+            _CACHED_ACCESS = current
+            return current
+        form = urllib.parse.urlencode(
+            {
+                "client_id": cid,
+                "client_secret": secret,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_value,
+            }
+        ).encode()
+        request = urllib.request.Request("https://id.twitch.tv/oauth2/token", data=form, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                payload = json.loads(response.read().decode())
+        except urllib.error.HTTPError as exc:
+            log(f"refresh broadcaster HTTP {exc.code}")
+            _CACHED_ACCESS = current
+            return current
+        access = _plain_token(payload.get("access_token") or "")
+        rotated = payload.get("refresh_token") or ""
+        if not access or not rotated:
+            log("refresh broadcaster incomplet")
+            _CACHED_ACCESS = current
+            return current
+        _write_bot_env(
+            {
+                "TWITCH_BROADCASTER_ACCESS_TOKEN": access,
+                "TWITCH_BROADCASTER_REFRESH_TOKEN": rotated,
+            }
+        )
+        _CACHED_ACCESS = access
+        return access
+    finally:
+        _unlock_file(handle)
+
+
+def client_id() -> str:
+    return load_env(BOT_ENV).get("TWITCH_CLIENT_ID", "")
+
+
+def validate_token() -> dict:
+    status, payload = http_json(
+        "GET",
+        "https://id.twitch.tv/oauth2/validate",
+        {"Authorization": "OAuth " + twitch_token()},
+    )
+    if status != 200 or not isinstance(payload, dict):
+        raise RuntimeError(f"jeton Twitch HTTP {status}")
+    return payload
+
+
+def has_raid_scope(payload: dict | None = None) -> bool:
+    data = payload if payload is not None else validate_token()
+    return RAID_SCOPE in (data.get("scopes") or [])
+
+
+def authorize_url() -> str:
+    query = urllib.parse.urlencode(
+        {
+            "client_id": client_id(),
+            "redirect_uri": "http://localhost:17563/callback",
+            "response_type": "code",
+            "scope": " ".join(KEEP_SCOPES),
+        }
+    )
+    return "https://id.twitch.tv/oauth2/authorize?" + query
+
+
+def helix(method: str, path: str, query: dict | None = None):
+    url = "https://api.twitch.tv/helix" + path
+    if query:
+        url += "?" + urllib.parse.urlencode(query)
+    return http_json(
+        method,
+        url,
+        {
+            "Client-ID": client_id(),
+            "Authorization": "Bearer " + twitch_token(),
+        },
+    )
+
+
+def stream_live(login: str) -> bool:
+    status, payload = helix("GET", "/streams", {"user_login": login})
+    if status != 200 or not isinstance(payload, dict):
+        raise RuntimeError(f"streams HTTP {status}")
+    return bool(payload.get("data"))
+
+
+def user_id_for_login(login: str) -> str | None:
+    status, payload = helix("GET", "/users", {"login": login})
+    if status != 200 or not isinstance(payload, dict):
+        return None
+    rows = payload.get("data") or []
+    if not rows:
+        return None
+    return str(rows[0].get("id") or "") or None
+
+
+def login_from_profile(token: str, discord_id: str) -> str | None:
+    status, payload = http_json(
+        "GET",
+        f"https://discord.com/api/v10/users/{discord_id}/profile?guild_id={GUILD_ID}",
+        discord_headers(token),
+    )
+    if status != 200 or not isinstance(payload, dict):
+        return None
+    user = payload.get("user") or {}
+    accounts = user.get("connected_accounts") or payload.get("connected_accounts") or []
+    for account in accounts:
+        if str(account.get("type") or "").lower() == "twitch" and account.get("name"):
+            return str(account["name"]).lower()
+    return None
+
+
+def resolve_login(token: str, discord_id: str, mention_name: str = "") -> tuple[str | None, str]:
+    mapped = load_map().get(discord_id)
+    if mapped:
+        return mapped, "table"
+    try:
+        connected = login_from_profile(token, discord_id)
+    except Exception:
+        connected = None
+    if connected and user_id_for_login(connected):
+        return connected, "connexion"
+    guess = (mention_name or "").strip().lower()
+    if guess and user_id_for_login(guess):
+        return guess, "pseudo"
+    return None, "inconnu"
+
+
+def mention_name(messages: list[dict], discord_id: str) -> str:
+    for item in messages:
+        for person in item.get("mentions") or []:
+            if str(person.get("id")) == discord_id:
+                return person.get("username") or ""
+    return ""
+
+
+def prepare(token: str, when: datetime | None = None) -> dict:
+    moment = when or datetime.now(PARIS)
+    day_name, channel_id = DAYS[moment.weekday()]
+    login, manual = manual_override(moment)
+    if manual:
+        state = {
+            "date": moment.date().isoformat(),
+            "day": day_name,
+            "channel_id": "",
+            "discord_id": "",
+            "twitch_login": login,
+            "source": "manuel" if login else "expire",
+            "prepared_at": moment.isoformat(),
+        }
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.chmod(STATE_PATH, 0o600)
+        if login:
+            log(f"prepare {day_name}: cible manuelle {login}, sans Discord")
+        else:
+            log(f"prepare {day_name}: cible manuelle expirée, pas de raid")
+        return state
+    messages = read_day_messages(token, channel_id)
+    discord_id = parse_target(messages)
+    login, source = (None, "vide")
+    if discord_id:
+        login, source = resolve_login(token, discord_id, mention_name(messages, discord_id))
+    state = {
+        "date": moment.date().isoformat(),
+        "day": day_name,
+        "channel_id": channel_id,
+        "discord_id": discord_id,
+        "twitch_login": login,
+        "source": source,
+        "prepared_at": moment.isoformat(),
+    }
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.chmod(STATE_PATH, 0o600)
+    if not discord_id:
+        log(f"prepare {day_name}: tranche 23h-00h vide, pas de raid")
+    elif not login:
+        log(f"prepare {day_name}: discord {discord_id} sans login Twitch, pas de raid")
+    else:
+        log(f"prepare {day_name}: cible {login} ({source})")
+    return state
+
+
+def raid_detail(status: int, payload) -> str:
+    """Résumé Helix sans jeton : heure de création, ou le message d'erreur."""
+    if isinstance(payload, dict):
+        rows = payload.get("data") or []
+        if status in (200, 202) and rows and rows[0].get("created_at"):
+            return "créé " + str(rows[0]["created_at"])
+        message = payload.get("message") or "sans données"
+        return str(message)[:120]
+    if isinstance(payload, str) and payload:
+        return payload[:120]
+    return "sans corps"
+
+
+def start_raid(to_id: str) -> tuple[int, str]:
+    status, payload = helix(
+        "POST",
+        "/raids",
+        {"from_broadcaster_id": BROADCASTER_ID, "to_broadcaster_id": to_id},
+    )
+    return status, raid_detail(status, payload)
+
+
+def raid_already_sent(data: dict, moment: datetime) -> bool:
+    return data.get("raid_sent_on") == moment.date().isoformat()
+
+
+def mark_raid_sent(moment: datetime) -> None:
+    data = {}
+    if STATE_PATH.exists():
+        try:
+            data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    if not isinstance(data, dict):
+        data = {}
+    data["raid_sent_on"] = moment.date().isoformat()
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.chmod(STATE_PATH, 0o600)
+
+
+def token_can_raid() -> bool:
+    try:
+        payload = validate_token()
+    except Exception:
+        return False
+    return has_raid_scope(payload) and str(payload.get("user_id") or "") == BROADCASTER_ID
+
+
+def ensure_raid_token() -> None:
+    """Ne tourne le jeton que s'il n'a plus le droit de raid."""
+    if token_can_raid():
+        return
+    refresh_broadcaster()
+
+
+def raid_notice(message: dict, to_id: str) -> str | None:
+    """'ok' si ce message EventSub est notre raid vers to_id, 'autre' sinon, None si hors sujet."""
+    if (message.get("metadata") or {}).get("message_type") != "notification":
+        return None
+    payload = message.get("payload") or {}
+    if (payload.get("subscription") or {}).get("type") != "channel.raid":
+        return None
+    event = payload.get("event") or {}
+    if str(event.get("from_broadcaster_user_id") or "") != BROADCASTER_ID:
+        return None
+    if str(event.get("to_broadcaster_user_id") or "") != str(to_id):
+        return "autre"
+    return "ok"
+
+
+def raid_target_text(message: dict) -> str:
+    event = ((message.get("payload") or {}).get("event") or {})
+    login = event.get("to_broadcaster_user_login") or "?"
+    viewers = event.get("viewers")
+    return f"{login} ({viewers} viewers)"
+
+
+def subscribe_outgoing_raid(session_id: str) -> tuple[int, str]:
+    status, payload = http_json(
+        "POST",
+        "https://api.twitch.tv/helix/eventsub/subscriptions",
+        {
+            "Client-ID": client_id(),
+            "Authorization": "Bearer " + twitch_token(),
+            "Content-Type": "application/json",
+        },
+        {
+            "type": "channel.raid",
+            "version": "1",
+            "condition": {"from_broadcaster_user_id": BROADCASTER_ID},
+            "transport": {"method": "websocket", "session_id": session_id},
+        },
+    )
+    if status == 202:
+        return status, "écoute posée"
+    if isinstance(payload, dict):
+        return status, str(payload.get("message") or "refus")[:120]
+    return status, str(payload or "sans corps")[:120]
+
+
+def confirm_outgoing_raid(to_id: str) -> bool:
+    """Attend l'événement channel.raid sortant. Le live de zaeldryk continue après un raid."""
+    import time
+
+    try:
+        import websocket
+    except ImportError:
+        log("échec : module websocket absent, raid non confirmé")
+        return False
+    try:
+        conn = websocket.create_connection(EVENTSUB_URL, timeout=20)
+    except Exception as exc:
+        log(f"échec : EventSub injoignable ({type(exc).__name__})")
+        return False
+    conn.settimeout(1)
+    deadline = time.time() + RAID_CONFIRM_SECONDS
+    subscribed = False
+    try:
+        while time.time() < deadline:
+            try:
+                raw = conn.recv()
+            except websocket.WebSocketTimeoutException:
+                continue
+            except Exception as exc:
+                log(f"échec : EventSub coupé ({type(exc).__name__})")
+                return False
+            message = json.loads(raw)
+            kind = (message.get("metadata") or {}).get("message_type")
+            if kind == "session_welcome" and not subscribed:
+                session_id = str(((message.get("payload") or {}).get("session") or {}).get("id") or "")
+                status, detail = subscribe_outgoing_raid(session_id)
+                subscribed = True
+                if status != 202:
+                    log(f"échec : écoute channel.raid refusée HTTP {status} {detail}")
+                    return False
+                log("écoute channel.raid sortant posée")
+                continue
+            if kind == "session_reconnect":
+                url = str(((message.get("payload") or {}).get("session") or {}).get("reconnect_url") or "")
+                if url:
+                    conn.close()
+                    conn = websocket.create_connection(url, timeout=20)
+                    conn.settimeout(1)
+                continue
+            if kind == "revocation":
+                log("échec : écoute channel.raid révoquée")
+                return False
+            notice = raid_notice(message, to_id)
+            if notice == "ok":
+                log(f"raid confirmé : {raid_target_text(message)}")
+                return True
+            if notice == "autre":
+                log(f"raid sortant vers une autre chaîne : {raid_target_text(message)}")
+        if not subscribed:
+            log("échec : pas de session EventSub")
+            return False
+        log(f"échec : aucun channel.raid sortant après {RAID_CONFIRM_SECONDS} s")
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def fire(token: str, forced_dry: bool = False) -> int:
+    now = datetime.now(PARIS)
+    if not forced_dry and STATE_PATH.exists():
+        try:
+            saved = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            saved = {}
+        if isinstance(saved, dict) and raid_already_sent(saved, now):
+            log("raid déjà demandé aujourd'hui, pas de second envoi")
+            return 0
+    ensure_raid_token()
+    state_path_data = prepare(token)
+    login = state_path_data.get("twitch_login")
+    if not login:
+        log("pas de cible, pas de raid")
+        return 0
+    if is_house(login):
+        if not forced_dry:
+            import time
+
+            gap = (fire_instant(datetime.now(PARIS), login) - datetime.now(PARIS)).total_seconds()
+            if 0 < gap <= 90:
+                time.sleep(gap)
+        log(f"{login} : cible maison, le raid part même hors live")
+    elif not stream_live(login):
+        log(f"{login} hors live, pas de raid")
+        return 0
+    if not stream_live(FROM_LOGIN):
+        log(f"zaeldryk hors live, pas de raid vers {login}")
+        return 0
+    armed = enabled() and has_raid_scope() and not dry_run(forced_dry)
+    if not armed:
+        reason = "dry-run"
+        if not enabled():
+            reason = "désactivé"
+        elif not has_raid_scope():
+            reason = "scope manquant"
+        log(f"{reason} : raid zaeldryk -> {login} non envoyé")
+        return 0
+    to_id = user_id_for_login(login)
+    if not to_id:
+        log(f"{login} introuvable sur Twitch, pas de raid")
+        return 0
+    status, detail = start_raid(to_id)
+    log(f"raid zaeldryk -> {login} HTTP {status} {detail}")
+    if status not in (200, 202):
+        return 1
+    mark_raid_sent(datetime.now(PARIS))
+    return 0 if confirm_outgoing_raid(to_id) else 1
+
+
+def fire_instant(moment: datetime, login: str | None) -> datetime:
+    """23:00:00 pile pour raidtwitchfamily, 22:59:30 pour les autres."""
+    if login and is_house(login):
+        return moment.replace(hour=23, minute=0, second=0, microsecond=0)
+    return moment.replace(hour=22, minute=59, second=30, microsecond=0)
+
+
+def wait_until_fire(moment: datetime, login: str | None = None) -> datetime | None:
+    """Attend l'instant de raid seulement si on est déjà dans la dernière minute."""
+    target = fire_instant(moment, login)
+    delta = (target - moment).total_seconds()
+    limit = 5 if login and is_house(login) else 90
+    if 0 < delta <= limit:
+        import time
+
+        time.sleep(delta)
+        return datetime.now(PARIS)
+    if -15 <= delta <= 0:
+        return moment
+    return None
+
+
+def due(kind: str, moment: datetime) -> bool:
+    """True only at 22:50 or 22:59 Europe/Paris, whichever the timer asked for."""
+    if kind == "prepare":
+        return moment.hour == 22 and moment.minute in (49, 50, 51)
+    return moment.hour == 22 and moment.minute == 59
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--prepare", action="store_true")
+    parser.add_argument("--fire", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    now = datetime.now(PARIS)
+    if not args.dry_run and args.prepare and not args.fire and not due("prepare", now):
+        return 0
+    preview, _preview_manual = manual_override(now)
+    if args.fire and not args.dry_run:
+        now = wait_until_fire(now, preview)
+        if now is None:
+            if preview and is_house(preview):
+                log(f"{preview} : passage trop tôt, le raid est à 23:00:00")
+            return 0
+    _login, manual = manual_override(now)
+    token = "" if manual else load_env(DISCORD_USER_ENV).get("DISCORD_USER_TOKEN", "")
+    if not manual and not token:
+        log("DISCORD_USER_TOKEN absent, arrêt")
+        return 1
+    if args.prepare or not args.fire:
+        prepare(token)
+    if args.fire or args.dry_run:
+        return fire(token, forced_dry=args.dry_run or not args.fire)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

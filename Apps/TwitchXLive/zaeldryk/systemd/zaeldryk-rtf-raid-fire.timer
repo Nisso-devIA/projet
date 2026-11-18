@@ -1,0 +1,17 @@
+[Unit]
+Description=Twitch raid at 22:59:30, or 23:00:00 for raidtwitchfamily
+
+[Timer]
+# Winter: 21:59 UTC = 22:59 Paris, 22:00 UTC = 23:00 Paris.
+# Summer: 20:59 UTC = 22:59 Paris, 21:00 UTC = 23:00 Paris.
+# The script waits until 22:59:30, or until 23:00:00 for raidtwitchfamily.
+OnCalendar=*-*-* 20:59:00
+OnCalendar=*-*-* 21:00:00
+OnCalendar=*-*-* 21:59:00
+OnCalendar=*-*-* 22:00:00
+AccuracySec=1s
+Persistent=true
+Unit=zaeldryk-rtf-raid-fire.service
+
+[Install]
+WantedBy=timers.target

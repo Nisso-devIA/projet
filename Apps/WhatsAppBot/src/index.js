@@ -4,7 +4,6 @@ import makeWASocket, {
   downloadMediaMessage,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
-  WAMessageStatus,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import { existsSync, unlinkSync } from "node:fs";
@@ -20,12 +19,10 @@ import { formatTranscript, transcribeAudioBuffer, warmupWhisper } from "./transc
 import { startHeartbeat, stopHeartbeat, writeHeartbeat } from "./heartbeat.js";
 import { notifyOwnerRecovery } from "./owner-notify.js";
 import { bindContactCache } from "./contact-cache.js";
-import { startLiveWatcher } from "./live-watcher.js";
+import { startLiveWatcher, stopLiveWatcher } from "./live-watcher.js";
+import { nextDelayMs, REPLACED_CODE, shouldStopReplaced } from "./reconnect.js";
+import { runPendingStatusRetry } from "./status-post.js";
 import { recordStatusView } from "./status-views.js";
-import {
-  notifyOwnerOutgoingRead,
-  shouldMarkIncomingAsRead,
-} from "./read-receipts.js";
 import {
   buildQuotedDownloadMessage,
   getAudioMessage,
@@ -39,30 +36,39 @@ import {
 
 const logger = pino({ level: "silent" });
 
-let starting = false;
 let reconnectTimer = null;
 let sessionId = 0;
 let currentSock = null;
+let connectPromise = null;
+let stopped = false;
+let reconnectAttempt = 0;
+let replacedStreak = 0;
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function scheduleReconnect(delayMs) {
+  if (stopped) return;
   if (reconnectTimer) clearTimeout(reconnectTimer);
+  console.log(`Reconnexion dans ${Math.round(delayMs / 1000)}s`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     startBot().catch((err) => {
-      console.error("Échec de reconnexion :", err);
-      process.exit(1);
+      console.error("Échec de reconnexion :", err.message);
     });
   }, delayMs);
 }
 
-async function closeSocket(sock) {
+async function retireSocket(sock) {
   if (!sock) return;
   try {
     sock.ev.removeAllListeners();
+  } catch {
+    /* ignore */
+  }
+  try {
+    sock.ws?.close();
   } catch {
     /* ignore */
   }
@@ -71,18 +77,24 @@ async function closeSocket(sock) {
   } catch {
     /* ignore */
   }
+  await delay(2000);
 }
 
 async function startBot() {
-  if (starting) return;
-  starting = true;
-  const id = ++sessionId;
+  if (stopped) return;
+  if (connectPromise) return connectPromise;
+  connectPromise = openSocket().finally(() => {
+    connectPromise = null;
+  });
+  return connectPromise;
+}
 
-  if (currentSock) {
-    await closeSocket(currentSock);
-    currentSock = null;
-    await delay(2000);
-  }
+async function openSocket() {
+  const id = ++sessionId;
+  stopLiveWatcher();
+  const previous = currentSock;
+  currentSock = null;
+  await retireSocket(previous);
 
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
   const { version } = await fetchLatestBaileysVersion();
@@ -122,29 +134,51 @@ async function startBot() {
     if (connection === "open") {
       const qrPath = join(ROOT_DIR, "qr.png");
       if (existsSync(qrPath)) unlinkSync(qrPath);
-      console.log(`Connecté. Bot prêt. Préfixe : ${config.prefix}`);
+      reconnectAttempt = 0;
+      replacedStreak = 0;
+      console.log(`Connecté. Bot prêt. Une session, un watcher. Préfixe : ${config.prefix}`);
       startHeartbeat("connected");
       if (config.transcribeVoice || config.transcribeMode === "command") warmupWhisper();
       await notifyOwnerRecovery(sock);
+      await runPendingStatusRetry(sock);
       startLiveWatcher(sock);
     }
 
     if (connection === "close") {
-      starting = false;
-      stopHeartbeat("disconnected");
+      if (id !== sessionId || stopped) return;
+      stopLiveWatcher();
+      startHeartbeat("disconnected");
       const error = lastDisconnect?.error;
       const status = error instanceof Boom ? error.output.statusCode : undefined;
 
       if (status === DisconnectReason.loggedOut) {
+        stopped = true;
         console.error(
-          "Session expirée. Supprime le dossier auth_info puis relance : npm start"
+          "Alerte : session expirée (401). Arrêt sans supprimer auth_info. Nishiro doit scanner un QR."
         );
-        process.exit(1);
+        return;
       }
 
-      const delayMs = status === DisconnectReason.connectionReplaced ? 25000 : 5000;
-      console.log(`Déconnecté (${status ?? "?"}), reconnexion dans ${delayMs / 1000}s…`);
-      scheduleReconnect(delayMs);
+      if (status === REPLACED_CODE || status === DisconnectReason.connectionReplaced) {
+        replacedStreak += 1;
+        console.error(
+          `Déconnecté (440 connectionReplaced) série=${replacedStreak}. Pas de boucle serrée.`
+        );
+        if (shouldStopReplaced(replacedStreak)) {
+          stopped = true;
+          console.error(
+            "Alerte : 440 persistant. Reconnexion arrêtée. Une autre session utilise peut-être ce compte. Aucun QR, dossier auth conservé."
+          );
+          return;
+        }
+        scheduleReconnect(nextDelayMs(REPLACED_CODE, replacedStreak));
+        return;
+      }
+
+      replacedStreak = 0;
+      reconnectAttempt += 1;
+      console.log(`Déconnecté (${status ?? "?"})`);
+      scheduleReconnect(nextDelayMs(status, reconnectAttempt));
     }
   });
 
@@ -172,21 +206,6 @@ async function startBot() {
         });
       } catch (err) {
         console.error("Vue statut :", err.message);
-      }
-    }
-  });
-
-  sock.ev.on("messages.update", async (updates) => {
-    if (id !== sessionId) return;
-    for (const { key, update } of updates) {
-      if (!key?.fromMe || !key.remoteJid) continue;
-      if (update.status !== WAMessageStatus.READ && update.status !== WAMessageStatus.PLAYED) {
-        continue;
-      }
-      try {
-        await notifyOwnerOutgoingRead(sock, key.remoteJid, key);
-      } catch (err) {
-        console.error("Erreur lecture sortante :", err.message);
       }
     }
   });
@@ -221,7 +240,7 @@ function alreadySeen(id) {
 async function transcribeVoice(sock, sourceMsg, jid, audio, { quotedMsg = null } = {}) {
   const pushName = sourceMsg.pushName || "";
   console.log(`[${pushName || jid}] (vocal ${audio.seconds || "?"}s)`);
-  if (shouldMarkIncomingAsRead(jid)) {
+  if (config.markAsRead) {
     await sock.readMessages([sourceMsg.key]).catch(() => {});
   }
   await sock.sendPresenceUpdate("composing", jid).catch(() => {});
@@ -317,7 +336,7 @@ async function onMessage(sock, msg, type = "notify") {
   const pushName = msg.pushName || "";
   console.log(`[${fromMe ? "moi" : pushName || jid}] ${text}`);
 
-  if (!fromMe && shouldMarkIncomingAsRead(jid)) {
+  if (!fromMe && config.markAsRead) {
     await sock.readMessages([msg.key]);
   }
 

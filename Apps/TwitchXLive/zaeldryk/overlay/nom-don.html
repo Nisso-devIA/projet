@@ -16,6 +16,7 @@
     body.fond { background: #102418; }
     .nom {
       box-sizing: border-box;
+      width: 100%;
       height: 100%;
       display: flex;
       flex-direction: column;
@@ -29,7 +30,14 @@
       color: #f4e2a8;
       text-shadow: 0 2px 0 #3a250c;
     }
-    .montant { font-size: 0.72em; letter-spacing: 0.04em; }
+    .montant { font-size: 22cqh; letter-spacing: 0.04em; }
+    .ligne {
+      width: 100%;
+      max-width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -38,27 +46,43 @@
     const params = new URLSearchParams(location.search);
     if (params.has("fond")) document.body.classList.add("fond");
     const nom = document.getElementById("nom");
+    let nameEl = null;
     function euros(bits) {
       const value = (Number(bits) || 0) / 100;
       if (value >= 1 && value % 1 === 0) return value.toFixed(0) + " €";
       if (value >= 1) return value.toFixed(1).replace(".", ",") + " €";
       return (Number(bits) || 0) + " bits";
     }
+    function fit(el) {
+      if (!el || el.clientWidth < 8) return;
+      const max = parseFloat(getComputedStyle(nom).fontSize) || 24;
+      let size = max;
+      el.style.fontSize = size + "px";
+      while (size > 8 && el.scrollWidth > el.clientWidth + 1) {
+        size -= 1;
+        el.style.fontSize = size + "px";
+      }
+      el.dataset.fit = String(size);
+    }
     function show(row) {
+      nameEl = null;
       if (!row || !row.name) {
         nom.textContent = "—";
         return;
       }
-      nom.innerHTML = "";
+      nom.textContent = "";
       const name = document.createElement("div");
+      name.className = "ligne";
       name.textContent = row.name;
       const amount = document.createElement("div");
       amount.className = "montant";
       amount.textContent = euros(row.bits);
       nom.append(name, amount);
+      nameEl = name;
+      requestAnimationFrame(() => fit(name));
     }
     if (params.has("demo")) {
-      show({ name: "Ruto", bits: 500 });
+      show({ name: params.get("nom") || "Ruto", bits: 500 });
     } else {
       async function tick() {
         try {
@@ -70,6 +94,7 @@
       tick();
       setInterval(tick, 3000);
     }
+    window.addEventListener("resize", () => fit(nameEl));
   </script>
 </body>
 </html>

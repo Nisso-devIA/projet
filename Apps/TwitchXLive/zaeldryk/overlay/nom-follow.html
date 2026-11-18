@@ -16,6 +16,7 @@
     body.fond { background: #102418; }
     .nom {
       box-sizing: border-box;
+      width: 100%;
       height: 100%;
       display: flex;
       align-items: center;
@@ -28,6 +29,13 @@
       color: #f4e2a8;
       text-shadow: 0 2px 0 #3a250c;
     }
+    .ligne {
+      width: 100%;
+      max-width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -36,16 +44,39 @@
     const params = new URLSearchParams(location.search);
     if (params.has("fond")) document.body.classList.add("fond");
     const nom = document.getElementById("nom");
+    let nameEl = null;
     function latest(rows) {
       const list = (rows || []).filter((row) => row && row.name);
       if (!list.length) return null;
       return list.slice().sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")))[0];
     }
+    function fit(el) {
+      if (!el || el.clientWidth < 8) return;
+      const max = parseFloat(getComputedStyle(nom).fontSize) || 24;
+      let size = max;
+      el.style.fontSize = size + "px";
+      while (size > 8 && el.scrollWidth > el.clientWidth + 1) {
+        size -= 1;
+        el.style.fontSize = size + "px";
+      }
+      el.dataset.fit = String(size);
+    }
     function show(row) {
-      nom.textContent = row && row.name ? row.name : "—";
+      nameEl = null;
+      if (!row || !row.name) {
+        nom.textContent = "—";
+        return;
+      }
+      nom.textContent = "";
+      const name = document.createElement("div");
+      name.className = "ligne";
+      name.textContent = row.name;
+      nom.append(name);
+      nameEl = name;
+      requestAnimationFrame(() => fit(name));
     }
     if (params.has("demo")) {
-      show({ name: "Epona", at: "1" });
+      show({ name: params.get("nom") || "Epona", at: "1" });
     } else {
       async function tick() {
         try {
@@ -57,6 +88,7 @@
       tick();
       setInterval(tick, 3000);
     }
+    window.addEventListener("resize", () => fit(nameEl));
   </script>
 </body>
 </html>

@@ -20,6 +20,7 @@ SCOPES = [
     "channel:manage:videos",
     "moderator:manage:chat_messages",
     "user:write:chat",
+    "channel:manage:raids",
 ]
 
 

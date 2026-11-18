@@ -2,17 +2,30 @@
 """Pages OBS : spectateurs, objectif, alertes, chat et plaques du cadre."""
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import socket
 import ssl
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime
+from datetime import timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+from rtf_current import (
+    DAYS,
+    PARIS,
+    RAID_CHANNEL,
+    SELF_LOGIN,
+    announcement_target,
+    build_snapshot,
+    planning_slots,
+)
 
 ROOT = Path(os.environ.get("ZAEL_ROOT", "/home/ubuntu/zaeldryk"))
 HTML = Path(__file__).with_name("viewers.html")
@@ -34,9 +47,8 @@ _chat: list[dict] = []
 CHAT_KEEP = 30
 
 
-def load_env() -> dict:
+def _read_env_file(path: Path) -> dict:
     env = {}
-    path = ROOT / "config" / "twitch.env"
     if not path.exists():
         return env
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -45,6 +57,12 @@ def load_env() -> dict:
             continue
         key, value = line.split("=", 1)
         env[key.strip()] = value.strip().strip('"').strip("'")
+    return env
+
+
+def load_env() -> dict:
+    env = _read_env_file(ROOT / "config" / "twitch.env")
+    env.update(_read_env_file(Path(__file__).resolve().parent / ".env"))
     return env
 
 
@@ -351,6 +369,105 @@ def activity_body() -> bytes:
     return json.dumps(data, ensure_ascii=False).encode("utf-8")
 
 
+_rtf_body = json.dumps(
+    {
+        "login": "",
+        "since": None,
+        "source": "",
+        "source_msg_id": "",
+        "zaeldryk_live": False,
+        "match": False,
+        "current_slot": {"login": "", "start": None, "live": False},
+        "next_slot": {"login": "", "start": None, "live": False},
+        "announcement_login": "",
+        "week": [],
+    }
+).encode()
+_rtf_lock = threading.Lock()
+
+
+def rtf_key() -> str:
+    return load_env().get("RTF_LURK_KEY", "")
+
+
+def discord_user_token() -> str:
+    return ""
+
+
+def _discord_messages(channel_id: str) -> list[dict]:
+    return []
+
+
+def _live_logins(logins: list[str]) -> set[str]:
+    names = [name for name in dict.fromkeys(logins) if name]
+    if not names:
+        return set()
+    env = load_env()
+    query = urllib.parse.urlencode([("user_login", name) for name in names])
+    request = urllib.request.Request(
+        "https://api.twitch.tv/helix/streams?" + query,
+        headers={
+            "Client-ID": env.get("TWITCH_CLIENT_ID", ""),
+            "Authorization": "Bearer " + token(),
+            "User-Agent": "ZaelrysViewers/1.0",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = json.loads(response.read().decode())
+    return {str(row.get("user_login") or "").lower() for row in payload.get("data") or []}
+
+
+RTF_GUILD = "935417890654547989"
+
+
+def _discord_json(path: str) -> dict:
+    return {}
+
+
+def _discord_profile(user_id: str) -> dict:
+    profile = {"twitch": "", "nick": "", "global_name": "", "username": ""}
+    try:
+        member = _discord_json(f"/guilds/{RTF_GUILD}/members/{user_id}")
+        user = member.get("user") or {}
+        profile["nick"] = member.get("nick") or ""
+        profile["global_name"] = user.get("global_name") or ""
+        profile["username"] = user.get("username") or ""
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        member = {}
+    try:
+        body = _discord_json(f"/users/{user_id}/profile?guild_id={RTF_GUILD}")
+        for account in body.get("connected_accounts") or []:
+            if str(account.get("type") or "").lower() == "twitch" and account.get("name"):
+                profile["twitch"] = str(account["name"])
+                break
+        user = body.get("user") or {}
+        profile["global_name"] = profile["global_name"] or user.get("global_name") or ""
+        profile["username"] = profile["username"] or user.get("username") or ""
+        guild_member = body.get("guild_member") or {}
+        profile["nick"] = profile["nick"] or guild_member.get("nick") or ""
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        pass
+    return profile
+
+
+def _mention_profiles(messages: list[dict]) -> dict[str, dict]:
+    ids = {
+        str(person.get("id"))
+        for message in messages
+        for person in (message.get("mentions") or [])
+        if person.get("id")
+    }
+    return {user_id: _discord_profile(user_id) for user_id in ids}
+
+
+def refresh_rtf() -> None:
+    return
+
+
+def rtf_loop() -> None:
+    return
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         return
@@ -364,7 +481,19 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self) -> None:
-        path = self.path.split("?", 1)[0]
+        parsed = urllib.parse.urlsplit(self.path)
+        path = parsed.path
+        if path == "/rtf-current":
+            given = (urllib.parse.parse_qs(parsed.query).get("key") or [""])[0]
+            expected = rtf_key()
+            if not expected or not hmac.compare_digest(given, expected):
+                self.send_response(403)
+                self.end_headers()
+                return
+            with _rtf_lock:
+                body = _rtf_body
+            self._send(body, "application/json; charset=utf-8")
+            return
         if path.startswith("/sounds/"):
             name = Path(path).name
             sound = Path(__file__).resolve().parent / "sounds" / name

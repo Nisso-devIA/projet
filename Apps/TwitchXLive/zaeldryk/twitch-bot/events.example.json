@@ -1,0 +1,8 @@
+{
+  "follow": "Merci pour le follow {user} ! Bienvenue dans la meute.",
+  "sub": "Merci pour l'abonnement {user} !",
+  "resub": "Merci {user} pour {months} mois d'abonnement !",
+  "gift": "Merci {user} pour {count} abonnement(s) offert(s) !",
+  "raid": "Bienvenue à {user} et aux {viewers} raideurs !",
+  "bits": "Merci {user} pour {bits} bits !"
+}

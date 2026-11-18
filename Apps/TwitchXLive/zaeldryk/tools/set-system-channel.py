@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Point system/rules channels to #📖-règlement for new joins."""
+"""Join notices go to #📜-bienvenue. The rules channel stays #📖-règlement."""
 import asyncio
 from pathlib import Path
 
@@ -7,6 +7,7 @@ import discord
 
 CONFIG = Path("/home/ubuntu/zaeldryk/config/discord.env")
 CHANNEL_REGLEMENT = "📖-règlement"
+CHANNEL_BIENVENUE = "📜-bienvenue"
 GUILD_ID = 867426693286461490
 
 
@@ -29,20 +30,23 @@ async def on_ready():
         guild = client.get_guild(GUILD_ID) or await client.fetch_guild(GUILD_ID)
         await guild.fetch_channels()
         reglement = discord.utils.get(guild.text_channels, name=CHANNEL_REGLEMENT)
+        bienvenue = discord.utils.get(guild.text_channels, name=CHANNEL_BIENVENUE)
         print(f"system_channel before: {guild.system_channel}")
         print(f"rules_channel before: {getattr(guild, 'rules_channel', None)}")
         print(f"reglement: {reglement}")
-        if reglement is None:
+        print(f"bienvenue: {bienvenue}")
+        if bienvenue is None:
             return
 
-        kwargs = {"system_channel": reglement}
-        # rules_channel only on community guilds
+        kwargs = {"system_channel": bienvenue}
+        # rules_channel only on community guilds; the rules post stays in #règlement
         try:
-            kwargs["rules_channel"] = reglement
-            await guild.edit(**kwargs, reason="ZAELDRYK join lands on réglement")
+            if reglement is not None:
+                kwargs["rules_channel"] = reglement
+            await guild.edit(**kwargs, reason="ZAELDRYK join notices go to bienvenue")
         except discord.HTTPException as e:
             print(f"rules_channel edit failed ({e}) — trying system_channel only")
-            await guild.edit(system_channel=reglement, reason="ZAELDRYK join lands on réglement")
+            await guild.edit(system_channel=bienvenue, reason="ZAELDRYK join notices go to bienvenue")
 
         # refresh
         guild = client.get_guild(GUILD_ID)

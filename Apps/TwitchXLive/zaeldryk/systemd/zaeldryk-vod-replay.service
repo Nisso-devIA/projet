@@ -1,0 +1,13 @@
+[Unit]
+Description=Rediffusion Twitch de la veille vers YouTube
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk
+Environment=ZAEL_ROOT=/home/ubuntu/zaeldryk
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 /home/ubuntu/zaeldryk/vod-replay/replay.py
+TimeoutStartSec=8h

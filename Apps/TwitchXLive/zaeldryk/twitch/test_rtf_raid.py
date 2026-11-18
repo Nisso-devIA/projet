@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+import unittest
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from rtf_raid import (
+    manual_override,
+    merge_env_text,
+    parse_target,
+    raid_already_sent,
+    raid_detail,
+    raid_notice,
+    requires_target_live,
+    slot_line,
+    user_on_line,
+    wait_until_fire,
+)
+
+PARIS = ZoneInfo("Europe/Paris")
+
+JEUDI = """07/11/26
+22H-23H🇫🇷/16H-17H🇨🇦:
+23H-00H🇫🇷/17H-18H🇨🇦: <@364111337036447745>
+"""
+
+
+class ParseTests(unittest.TestCase):
+    def test_jeudi_grid_is_mrkrakotte(self):
+        messages = [
+            {"timestamp": "2026-01-15T06:08:02Z", "content": "OUVERTURE DES INSCRIPTIONS"},
+            {"timestamp": "2026-08-01T09:03:40Z", "content": JEUDI},
+            {"timestamp": "2026-11-12T09:32:21Z", "content": "18H-19H🇫🇷 <@1365980593300574298>"},
+        ]
+        self.assertEqual(parse_target(messages), "364111337036447745")
+
+    def test_later_correction_replaces_the_slot(self):
+        messages = [
+            {"timestamp": "2026-11-11T18:00:00Z", "content": JEUDI},
+            {"timestamp": "2026-11-12T20:00:00Z", "content": "23H-00H🇫🇷 <@624557350531104779>"},
+        ]
+        self.assertEqual(parse_target(messages), "624557350531104779")
+
+    def test_annulation_clears_the_slot(self):
+        messages = [
+            {"timestamp": "2026-11-11T18:00:00Z", "content": JEUDI},
+            {"timestamp": "2026-11-12T20:00:00Z", "content": "23h-00h : annulation <@364111337036447745>"},
+        ]
+        self.assertIsNone(parse_target(messages))
+
+    def test_empty_slot(self):
+        content = "22H-23H🇫🇷:\n23H-00H🇫🇷/17H-18H🇨🇦:\n"
+        self.assertIsNone(user_on_line(slot_line(content)))
+
+    def test_other_hour_is_not_the_raid_slot(self):
+        self.assertIsNone(slot_line("18H-19H🇫🇷 <@1>"))
+
+    def test_env_merge_replaces_only_the_named_keys(self):
+        original = "TWITCH_CLIENT_ID=app\nTWITCH_BROADCASTER_ACCESS_TOKEN=old-access\nOTHER=keep\n"
+        merged = merge_env_text(
+            original,
+            {
+                "TWITCH_BROADCASTER_ACCESS_TOKEN": "new-access",
+                "TWITCH_BROADCASTER_REFRESH_TOKEN": "new-refresh",
+            },
+        )
+        self.assertIn("TWITCH_CLIENT_ID=app\n", merged)
+        self.assertIn("OTHER=keep\n", merged)
+        self.assertIn("TWITCH_BROADCASTER_ACCESS_TOKEN=new-access\n", merged)
+        self.assertIn("TWITCH_BROADCASTER_REFRESH_TOKEN=new-refresh\n", merged)
+        self.assertNotIn("old-access", merged)
+
+    def test_manual_target_is_only_valid_on_its_date(self):
+        env = {"RTF_RAID_TARGET": "@Mrkrakottefr", "RTF_RAID_TARGET_DATE": "2026-11-16"}
+        tonight = datetime(2026, 11, 16, 22, 50, tzinfo=PARIS)
+        tomorrow = datetime(2026, 11, 17, 22, 50, tzinfo=PARIS)
+        self.assertEqual(manual_override(tonight, env), ("mrkrakottefr", True))
+        self.assertEqual(manual_override(tomorrow, env), (None, False))
+        day_before = datetime(2026, 11, 15, 22, 50, tzinfo=PARIS)
+        self.assertEqual(manual_override(day_before, env), (None, True))
+        phrase = {"RTF_RAID_TARGET": "raid la rtf", "RTF_RAID_TARGET_DATE": "2026-11-18"}
+        wednesday = datetime(2026, 11, 18, 22, 50, tzinfo=PARIS)
+        thursday = datetime(2026, 11, 19, 22, 50, tzinfo=PARIS)
+        self.assertEqual(manual_override(wednesday, phrase), ("raidtwitchfamily", True))
+        self.assertEqual(manual_override(thursday, phrase), (None, False))
+        self.assertFalse(requires_target_live("raidtwitchfamily"))
+        self.assertFalse(requires_target_live("raid la rtf"))
+        self.assertTrue(requires_target_live("mrkrakottefr"))
+
+    def test_raid_detail_keeps_the_creation_time_or_the_error(self):
+        body = {"data": [{"created_at": "2026-11-18T22:00:01Z", "is_mature": False}]}
+        self.assertEqual(raid_detail(200, body), "créé 2026-11-18T22:00:01Z")
+        self.assertEqual(raid_detail(409, "The broadcaster is not streaming live."), "The broadcaster is not streaming live.")
+        self.assertEqual(raid_detail(200, {"data": []}), "sans données")
+
+    def test_outgoing_raid_notice_matches_only_our_target(self):
+        def message(to_id):
+            return {
+                "metadata": {"message_type": "notification"},
+                "payload": {
+                    "subscription": {"type": "channel.raid"},
+                    "event": {
+                        "from_broadcaster_user_id": "426411773",
+                        "to_broadcaster_user_id": to_id,
+                        "to_broadcaster_user_login": "raidtwitchfamily",
+                        "viewers": 12,
+                    },
+                },
+            }
+
+        self.assertEqual(raid_notice(message("791896111"), "791896111"), "ok")
+        self.assertEqual(raid_notice(message("999"), "791896111"), "autre")
+        incoming = message("426411773")
+        incoming["payload"]["event"]["from_broadcaster_user_id"] = "1"
+        self.assertIsNone(raid_notice(incoming, "791896111"))
+        self.assertIsNone(raid_notice({"metadata": {"message_type": "session_keepalive"}}, "791896111"))
+
+    def test_a_raid_is_not_sent_twice_the_same_day(self):
+        moment = datetime(2026, 11, 19, 23, 0, tzinfo=PARIS)
+        self.assertTrue(raid_already_sent({"raid_sent_on": "2026-11-19"}, moment))
+        self.assertFalse(raid_already_sent({"raid_sent_on": "2026-11-18"}, moment))
+        self.assertFalse(raid_already_sent({}, moment))
+
+    def test_missing_manual_target_keeps_the_discord_path(self):
+        moment = datetime(2026, 11, 16, 22, 50, tzinfo=PARIS)
+        self.assertEqual(manual_override(moment, {}), (None, False))
+
+    def test_fire_only_waits_near_the_right_instant(self):
+        morning = datetime(2026, 11, 12, 12, 0, tzinfo=PARIS)
+        self.assertIsNone(wait_until_fire(morning, "someone"))
+        just_after = datetime(2026, 11, 12, 22, 59, 40, tzinfo=PARIS)
+        self.assertEqual(wait_until_fire(just_after, "someone"), just_after)
+        house_early = datetime(2026, 11, 18, 22, 59, 0, tzinfo=PARIS)
+        self.assertIsNone(wait_until_fire(house_early, "raidtwitchfamily"))
+        house_on_time = datetime(2026, 11, 18, 23, 0, 2, tzinfo=PARIS)
+        self.assertEqual(wait_until_fire(house_on_time, "raidtwitchfamily"), house_on_time)
+
+
+if __name__ == "__main__":
+    unittest.main()
