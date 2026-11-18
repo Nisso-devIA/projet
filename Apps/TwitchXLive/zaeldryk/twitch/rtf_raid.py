@@ -131,8 +131,8 @@ def is_house(login: str) -> bool:
 
 
 def requires_target_live(login: str) -> bool:
-    """Twitch répond 200 même si la cible est hors live, puis n'envoie personne."""
-    return True
+    """raidtwitchfamily est toujours hors live. Les autres cibles doivent l'être."""
+    return not is_house(login)
 
 
 def dry_run(forced: bool = False) -> bool:
@@ -525,33 +525,13 @@ def ensure_raid_token() -> None:
     refresh_broadcaster()
 
 
-def wait_until_target_live(login: str) -> bool:
-    """La maison RTF a jusqu'à 23:08 Paris. Les autres cibles sont testées une fois."""
-    if stream_live(login):
-        return True
-    if not is_house(login):
-        return False
-    import time
-
-    deadline = datetime.now(PARIS).replace(hour=23, minute=8, second=0, microsecond=0)
-    if datetime.now(PARIS) >= deadline:
-        return False
-    log(f"{login} hors live, attente jusqu'à 23:08 Paris")
-    while datetime.now(PARIS) < deadline:
-        time.sleep(15)
-        if stream_live(login):
-            log(f"{login} est en live")
-            return True
-    return False
-
-
 def confirm_raid_left(login: str) -> bool:
     """Un raid abouti coupe le live. 95 s couvrent le décompte Twitch de 90 s."""
     import time
 
     time.sleep(95)
     if stream_live(FROM_LOGIN):
-        log(f"raid non parti : zaeldryk toujours en live après le décompte vers {login}")
+        log(f"échec : zaeldryk toujours en live 95 s après le POST vers {login}. Le décompte Twitch n'a pas abouti.")
         return False
     log(f"raid confirmé : zaeldryk n'est plus en live, viewers partis vers {login}")
     return True
@@ -573,16 +553,16 @@ def fire(token: str, forced_dry: bool = False) -> int:
     if not login:
         log("pas de cible, pas de raid")
         return 0
-    if is_house(login) and not forced_dry:
-        import time
+    if is_house(login):
+        if not forced_dry:
+            import time
 
-        gap = (fire_instant(datetime.now(PARIS), login) - datetime.now(PARIS)).total_seconds()
-        if 0 < gap <= 90:
-            time.sleep(gap)
-        log(f"{login} : raid à 23:00:00, uniquement si la cible est en live")
-    target_live = stream_live(login) if forced_dry else wait_until_target_live(login)
-    if not target_live:
-        log(f"{login} hors live, pas de raid : Twitch accepterait le POST puis n'enverrait personne")
+            gap = (fire_instant(datetime.now(PARIS), login) - datetime.now(PARIS)).total_seconds()
+            if 0 < gap <= 90:
+                time.sleep(gap)
+        log(f"{login} : cible maison, le raid part même hors live")
+    elif not stream_live(login):
+        log(f"{login} hors live, pas de raid")
         return 0
     if not stream_live(FROM_LOGIN):
         log(f"zaeldryk hors live, pas de raid vers {login}")

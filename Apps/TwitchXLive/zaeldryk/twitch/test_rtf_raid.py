@@ -81,8 +81,8 @@ class ParseTests(unittest.TestCase):
         thursday = datetime(2026, 11, 19, 22, 50, tzinfo=PARIS)
         self.assertEqual(manual_override(wednesday, phrase), ("raidtwitchfamily", True))
         self.assertEqual(manual_override(thursday, phrase), (None, False))
-        self.assertTrue(requires_target_live("raidtwitchfamily"))
-        self.assertTrue(requires_target_live("raid la rtf"))
+        self.assertFalse(requires_target_live("raidtwitchfamily"))
+        self.assertFalse(requires_target_live("raid la rtf"))
         self.assertTrue(requires_target_live("mrkrakottefr"))
 
     def test_raid_detail_keeps_the_creation_time_or_the_error(self):
