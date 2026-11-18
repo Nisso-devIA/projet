@@ -1,0 +1,12 @@
+[Unit]
+Description=Check followed Twitch friends every minute
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=60
+AccuracySec=5s
+Persistent=true
+Unit=zaeldryk-copains-live.service
+
+[Install]
+WantedBy=timers.target

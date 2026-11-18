@@ -16,7 +16,7 @@ API = "https://discord.com/api/v10"
 
 
 DEDUPE_WINDOW = timedelta(minutes=10)
-LIVE_TITLE_MARK = "est en LIVE"
+LIVE_TITLE_MARK = "Zaeldryk est en LIVE"
 
 
 def load_env(path: Path) -> dict:
