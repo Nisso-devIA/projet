@@ -25,6 +25,7 @@ from temp_voice import cleanup_empty_temp_channels, register_temp_voice
 from annonce_access import can_use_annonce
 from giveaway import register_giveaway, restore_giveaways
 from bot_message import register_bot_message
+from monteur_watch import register_monteur_watch
 
 CONFIG_PATH = Path("/home/ubuntu/zaeldryk/config/discord.env")
 XAI_ENV_PATH = Path("/home/ubuntu/zaeldryk/config/xai.env")
@@ -1433,4 +1434,5 @@ register_level_commands(bot)
 register_unverified_commands(bot)
 register_giveaway(bot)
 register_bot_message(bot)
+register_monteur_watch(bot)
 bot.run(BOT_TOKEN)
