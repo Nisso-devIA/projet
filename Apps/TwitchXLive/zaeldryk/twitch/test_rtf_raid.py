@@ -7,6 +7,7 @@ from rtf_raid import (
     manual_override,
     merge_env_text,
     parse_target,
+    raid_already_sent,
     raid_detail,
     requires_target_live,
     slot_line,
@@ -89,6 +90,12 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(raid_detail(200, body), "créé 2026-11-18T22:00:01Z")
         self.assertEqual(raid_detail(409, "The broadcaster is not streaming live."), "The broadcaster is not streaming live.")
         self.assertEqual(raid_detail(200, {"data": []}), "sans données")
+
+    def test_a_raid_is_not_sent_twice_the_same_day(self):
+        moment = datetime(2026, 11, 19, 23, 0, tzinfo=PARIS)
+        self.assertTrue(raid_already_sent({"raid_sent_on": "2026-11-19"}, moment))
+        self.assertFalse(raid_already_sent({"raid_sent_on": "2026-11-18"}, moment))
+        self.assertFalse(raid_already_sent({}, moment))
 
     def test_missing_manual_target_keeps_the_discord_path(self):
         moment = datetime(2026, 11, 16, 22, 50, tzinfo=PARIS)

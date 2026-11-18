@@ -491,6 +491,25 @@ def start_raid(to_id: str) -> tuple[int, str]:
     return status, raid_detail(status, payload)
 
 
+def raid_already_sent(data: dict, moment: datetime) -> bool:
+    return data.get("raid_sent_on") == moment.date().isoformat()
+
+
+def mark_raid_sent(moment: datetime) -> None:
+    data = {}
+    if STATE_PATH.exists():
+        try:
+            data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    if not isinstance(data, dict):
+        data = {}
+    data["raid_sent_on"] = moment.date().isoformat()
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.chmod(STATE_PATH, 0o600)
+
+
 def token_can_raid() -> bool:
     try:
         payload = validate_token()
@@ -539,6 +558,15 @@ def confirm_raid_left(login: str) -> bool:
 
 
 def fire(token: str, forced_dry: bool = False) -> int:
+    now = datetime.now(PARIS)
+    if not forced_dry and STATE_PATH.exists():
+        try:
+            saved = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            saved = {}
+        if isinstance(saved, dict) and raid_already_sent(saved, now):
+            log("raid déjà demandé aujourd'hui, pas de second envoi")
+            return 0
     ensure_raid_token()
     state_path_data = prepare(token)
     login = state_path_data.get("twitch_login")
@@ -576,6 +604,7 @@ def fire(token: str, forced_dry: bool = False) -> int:
     log(f"raid zaeldryk -> {login} HTTP {status} {detail}")
     if status not in (200, 202):
         return 1
+    mark_raid_sent(datetime.now(PARIS))
     return 0 if confirm_raid_left(login) else 1
 
 
