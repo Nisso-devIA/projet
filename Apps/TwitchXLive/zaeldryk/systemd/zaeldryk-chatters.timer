@@ -1,0 +1,11 @@
+[Unit]
+Description=Sample Twitch chatters every minute while zaeldryk is live
+
+[Timer]
+OnCalendar=*:*:00
+AccuracySec=1s
+Persistent=false
+Unit=zaeldryk-chatters.service
+
+[Install]
+WantedBy=timers.target
