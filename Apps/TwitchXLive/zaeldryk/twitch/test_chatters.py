@@ -10,6 +10,7 @@ apply_sample = _mod.apply_sample
 keep_login = _mod.keep_login
 paris_day = _mod.paris_day
 summary_text = _mod.summary_text
+update_env_text = _mod.update_env_text
 
 
 class ChatterTests(unittest.TestCase):
@@ -51,6 +52,30 @@ class ChatterTests(unittest.TestCase):
         self.assertIn("chatters : 2", text)
         self.assertIn("lurkers : 1", text)
         self.assertIn("a · 10 min", text)
+
+    def test_chatters_token_update_leaves_the_other_tokens(self):
+        original = "\n".join(
+            [
+                "TWITCH_BOT_ACCESS_TOKEN=bot-access",
+                "TWITCH_BOT_REFRESH_TOKEN=bot-refresh",
+                "TWITCH_BROADCASTER_ACCESS_TOKEN=raid-access",
+                "TWITCH_BROADCASTER_REFRESH_TOKEN=raid-refresh",
+                "TWITCH_CHATTERS_ACCESS_TOKEN=old-access",
+                "TWITCH_CHATTERS_REFRESH_TOKEN=old-refresh",
+            ]
+        )
+        updated = update_env_text(
+            original,
+            {
+                "TWITCH_CHATTERS_ACCESS_TOKEN": "new-access",
+                "TWITCH_CHATTERS_REFRESH_TOKEN": "new-refresh",
+            },
+        )
+        self.assertIn("TWITCH_BOT_ACCESS_TOKEN=bot-access\n", updated)
+        self.assertIn("TWITCH_BROADCASTER_ACCESS_TOKEN=raid-access\n", updated)
+        self.assertIn("TWITCH_BROADCASTER_REFRESH_TOKEN=raid-refresh\n", updated)
+        self.assertIn("TWITCH_CHATTERS_ACCESS_TOKEN=new-access\n", updated)
+        self.assertNotIn("old-access", updated)
 
 
 if __name__ == "__main__":
