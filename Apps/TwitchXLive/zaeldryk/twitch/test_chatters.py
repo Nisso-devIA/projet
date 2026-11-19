@@ -29,7 +29,7 @@ class ChatterTests(unittest.TestCase):
         self.assertNotIn("zaeldryk", viewers)
         self.assertNotIn("nightbot", viewers)
         self.assertEqual(viewers["belka_dz"]["samples"], 2)
-        self.assertEqual(viewers["belka_dz"]["estimated_minutes"], 10)
+        self.assertEqual(viewers["belka_dz"]["estimated_minutes"], 2)
         self.assertEqual(viewers["belka_dz"]["first_seen"], "2026-11-18T22:00:00+01:00")
         self.assertEqual(viewers["belka_dz"]["last_seen"], "2026-11-18T22:05:00+01:00")
         self.assertFalse(viewers["belka_dz"]["lurker"])

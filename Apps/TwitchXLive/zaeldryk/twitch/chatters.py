@@ -21,7 +21,7 @@ BOT_ENV = Path(os.environ.get("TWITCH_BOT_ENV", ROOT / "twitch-bot" / ".env"))
 STATS_PATH = Path(os.environ.get("LIVE_STATS", ROOT / "twitch-bot" / "data" / "live-stats.json"))
 BROADCASTER_ID = "426411773"
 SCOPE = "moderator:read:chatters"
-INTERVAL_MINUTES = 5
+INTERVAL_MINUTES = 1
 EXCLUDED = {
     "zaeldryk",
     "zaeldryk_bot",

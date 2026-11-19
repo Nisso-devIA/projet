@@ -1,9 +1,9 @@
 [Unit]
-Description=Sample Twitch chatters every 5 minutes while zaeldryk is live
+Description=Sample Twitch chatters every minute while zaeldryk is live
 
 [Timer]
-OnCalendar=*:0/5
-AccuracySec=15s
+OnCalendar=*:*:00
+AccuracySec=1s
 Persistent=false
 Unit=zaeldryk-chatters.service
 
