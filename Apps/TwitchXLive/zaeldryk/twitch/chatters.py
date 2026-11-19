@@ -330,7 +330,7 @@ def main() -> int:
         return 0
     env = load_env(BOT_ENV)
     client_id = env.get("TWITCH_CLIENT_ID", "")
-    token = plain_token(env.get("TWITCH_BOT_ACCESS_TOKEN", ""))
+    token = plain_token(env.get("TWITCH_CHATTERS_ACCESS_TOKEN") or env.get("TWITCH_BOT_ACCESS_TOKEN", ""))
     if not client_id or not token:
         print("jeton bot absent")
         return 1
