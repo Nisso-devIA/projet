@@ -49,8 +49,7 @@ def load_env(path: Path) -> dict:
     return values
 
 
-CHATTERS_ACCESS = "TWITCH_CHATTERS_ACCESS_TOKEN"
-CHATTERS_REFRESH = "TWITCH_CHATTERS_REFRESH_TOKEN"
+MODERATOR_ID = "1609308159"
 
 
 def plain_token(value: str) -> str:
@@ -190,63 +189,6 @@ def update_env_text(text: str, updates: dict) -> str:
     return "\n".join(out) + "\n"
 
 
-def save_chatters_tokens(access_token: str, refresh_token: str) -> None:
-    current = BOT_ENV.read_text(encoding="utf-8") if BOT_ENV.exists() else ""
-    BOT_ENV.write_text(
-        update_env_text(
-            current,
-            {CHATTERS_ACCESS: access_token, CHATTERS_REFRESH: refresh_token},
-        ),
-        encoding="utf-8",
-    )
-    os.chmod(BOT_ENV, 0o600)
-
-
-def refresh_chatters_token(client_id: str, secret: str, refresh_token: str) -> tuple[str, str]:
-    form = urllib.parse.urlencode(
-        {
-            "client_id": client_id,
-            "client_secret": secret,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-        }
-    ).encode()
-    request = urllib.request.Request("https://id.twitch.tv/oauth2/token", data=form, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode())
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"refresh chatters HTTP {exc.code}") from exc
-    access = plain_token(payload.get("access_token") or "")
-    rotated = payload.get("refresh_token") or ""
-    if not access or not rotated:
-        raise RuntimeError("refresh chatters incomplet")
-    save_chatters_tokens(access, rotated)
-    return access, rotated
-
-
-def ensure_chatters_token(env: dict) -> str:
-    """Jeton zaeldryk dédié au relevé. Ne lit pas le jeton du bot ni celui des raids."""
-    client_id = env.get("TWITCH_CLIENT_ID", "")
-    secret = env.get("TWITCH_CLIENT_SECRET", "")
-    access = plain_token(env.get(CHATTERS_ACCESS, ""))
-    refresh_value = env.get(CHATTERS_REFRESH, "")
-    status, info = validate(access) if access else (0, {})
-    fresh = (
-        status == 200
-        and isinstance(info, dict)
-        and SCOPE in (info.get("scopes") or [])
-        and str(info.get("user_id") or "") == BROADCASTER_ID
-        and int(info.get("expires_in") or 0) > 600
-    )
-    if fresh:
-        return access
-    if not refresh_value or not client_id or not secret:
-        raise RuntimeError("jeton chatters absent")
-    access, _rotated = refresh_chatters_token(client_id, secret, refresh_value)
-    return access
-
-
 def validate(token: str) -> tuple[int, dict]:
     return http_json("GET", "https://id.twitch.tv/oauth2/validate", {"Authorization": "OAuth " + token})
 
@@ -357,13 +299,13 @@ def check(client_id: str, token: str) -> int:
         return 1
     print("zaeldryk", "en live" if stream else "hors live")
     if not has_scope:
-        code, _payload = fetch_chatters(client_id, token, BROADCASTER_ID)
+        code, _payload = fetch_chatters(client_id, token, MODERATOR_ID)
         print(f"GET /chat/chatters HTTP {code}")
         return 0
     if not stream:
         print("pas de relevé : hors live")
         return 0
-    code, logins = fetch_chatters(client_id, token, BROADCASTER_ID)
+    code, logins = fetch_chatters(client_id, token, MODERATOR_ID)
     print(f"GET /chat/chatters HTTP {code} chatters {len(logins)}")
     if code == 200:
         path = record(stream, logins)
@@ -387,7 +329,7 @@ def sample(client_id: str, token: str) -> int:
     if SCOPE not in (info.get("scopes") or []):
         print(f"scope {SCOPE} manquant sur {info.get('login')}, relevé non fait")
         return 0
-    code, logins = fetch_chatters(client_id, token, BROADCASTER_ID)
+    code, logins = fetch_chatters(client_id, token, MODERATOR_ID)
     if code != 200:
         print(f"GET /chat/chatters HTTP {code}")
         return 1
@@ -410,13 +352,9 @@ def main() -> int:
         return 0
     env = load_env(BOT_ENV)
     client_id = env.get("TWITCH_CLIENT_ID", "")
-    try:
-        token = ensure_chatters_token(env)
-    except RuntimeError as exc:
-        print(exc)
-        return 1
+    token = plain_token(env.get("TWITCH_BOT_ACCESS_TOKEN", ""))
     if not client_id or not token:
-        print("jeton chatters absent")
+        print("jeton bot absent")
         return 1
     if args.check:
         return check(client_id, token)
