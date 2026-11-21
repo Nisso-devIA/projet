@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 
 from rtf_raid import (
     manual_override,
+    raid_refusal,
+    scheduled_login,
     merge_env_text,
     parse_target,
     raid_already_sent,
@@ -74,14 +76,17 @@ class ParseTests(unittest.TestCase):
         tonight = datetime(2026, 11, 16, 22, 50, tzinfo=PARIS)
         tomorrow = datetime(2026, 11, 17, 22, 50, tzinfo=PARIS)
         self.assertEqual(manual_override(tonight, env), ("mrkrakottefr", True))
-        self.assertEqual(manual_override(tomorrow, env), (None, False))
+        self.assertEqual(manual_override(tomorrow, env), (None, True))
         day_before = datetime(2026, 11, 15, 22, 50, tzinfo=PARIS)
         self.assertEqual(manual_override(day_before, env), (None, True))
         phrase = {"RTF_RAID_TARGET": "raid la rtf", "RTF_RAID_TARGET_DATE": "2026-11-18"}
         wednesday = datetime(2026, 11, 18, 22, 50, tzinfo=PARIS)
         thursday = datetime(2026, 11, 19, 22, 50, tzinfo=PARIS)
         self.assertEqual(manual_override(wednesday, phrase), ("raidtwitchfamily", True))
-        self.assertEqual(manual_override(thursday, phrase), (None, False))
+        self.assertEqual(manual_override(thursday, phrase), (None, True))
+        self.assertIsNone(raid_refusal(wednesday, phrase))
+        self.assertEqual(scheduled_login(wednesday, phrase), "raidtwitchfamily")
+        self.assertEqual(raid_refusal(thursday, phrase), "jeudi : jour sans raid, aucun raid")
         self.assertFalse(requires_target_live("raidtwitchfamily"))
         self.assertFalse(requires_target_live("raid la rtf"))
         self.assertTrue(requires_target_live("mrkrakottefr"))
@@ -120,9 +125,27 @@ class ParseTests(unittest.TestCase):
         self.assertFalse(raid_already_sent({"raid_sent_on": "2026-11-18"}, moment))
         self.assertFalse(raid_already_sent({}, moment))
 
-    def test_missing_manual_target_keeps_the_discord_path(self):
+    def test_raid_needs_an_allowed_evening_and_that_exact_date(self):
+        empty = {}
+        friday = datetime(2026, 11, 20, 23, 0, tzinfo=PARIS)
+        saturday = datetime(2026, 11, 21, 23, 0, tzinfo=PARIS)
+        tuesday = datetime(2026, 11, 17, 23, 0, tzinfo=PARIS)
+        sunday = datetime(2026, 11, 22, 23, 0, tzinfo=PARIS)
+        stale = {"RTF_RAID_TARGET": "raidtwitchfamily", "RTF_RAID_TARGET_DATE": "2026-11-18"}
+        self.assertEqual(raid_refusal(friday, empty), "pas sur le planning, aucun raid")
+        self.assertEqual(raid_refusal(saturday, stale), "pas sur le planning, aucun raid")
+        booked = {"RTF_RAID_TARGET": "raidtwitchfamily", "RTF_RAID_TARGET_DATE": "2026-11-21"}
+        self.assertIsNone(raid_refusal(saturday, booked))
+        self.assertEqual(scheduled_login(saturday, booked), "raidtwitchfamily")
+        tuesday_entry = {"RTF_RAID_TARGET": "quelquun", "RTF_RAID_TARGET_DATE": "2026-11-17"}
+        sunday_entry = {"RTF_RAID_TARGET": "quelquun", "RTF_RAID_TARGET_DATE": "2026-11-22"}
+        self.assertEqual(raid_refusal(tuesday, tuesday_entry), "mardi : jour sans raid, aucun raid")
+        self.assertEqual(raid_refusal(sunday, sunday_entry), "dimanche : jour sans raid, aucun raid")
+
+    def test_missing_manual_target_does_not_open_discord(self):
         moment = datetime(2026, 11, 16, 22, 50, tzinfo=PARIS)
-        self.assertEqual(manual_override(moment, {}), (None, False))
+        self.assertEqual(manual_override(moment, {}), (None, True))
+        self.assertEqual(raid_refusal(moment, {}), "pas sur le planning, aucun raid")
 
     def test_fire_only_waits_near_the_right_instant(self):
         morning = datetime(2026, 11, 12, 12, 0, tzinfo=PARIS)
