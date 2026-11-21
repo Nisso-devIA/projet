@@ -105,7 +105,7 @@ def chapter_block(chapters: list[tuple[int, str]]) -> str:
     return "\n".join(f"{stamp(moment)} {name}" for moment, name in chapters)
 
 
-DEFAULT_GAME = "Zelda Ocarina of Time"
+DEFAULT_GAME = "Ocarina of Time remake"
 GENERIC_CATEGORIES = {
     "just chatting",
     "music",
@@ -119,8 +119,17 @@ GENERIC_CATEGORIES = {
 }
 
 
+def keep_planned_game(planned: str, seen: str) -> str:
+    """La vision ne remplace pas un Ocarina of Time déjà reconnu (ex. Echoes of Wisdom)."""
+    planned_name = " ".join((planned or "").split())
+    seen_name = " ".join((seen or "").split())
+    if "ocarina of time" in planned_name.lower():
+        return planned_name
+    return (seen_name or planned_name)[:60]
+
+
 def game_label(title: str, category: str = "") -> str:
-    """Catégorie Twitch d'abord, puis le titre, sinon Zelda Ocarina of Time."""
+    """Catégorie Twitch d'abord, puis le titre, sinon Ocarina of Time remake."""
     name = " ".join((category or "").split())
     if name and name.lower() not in GENERIC_CATEGORIES:
         if "ocarina" in name.lower():
@@ -583,7 +592,7 @@ def run(dry_run: bool, vod_id: str = "") -> int:
     api_key, model = xai_key_and_model()
     try:
         seen_game, seen_chapters = frames_and_chapters(path, duration_s, api_key, model)
-        game = seen_game or game
+        game = keep_planned_game(game, seen_game)
         chapters = seen_chapters
         end = vod_end(vod) or now
         title = title_for(game, end)
