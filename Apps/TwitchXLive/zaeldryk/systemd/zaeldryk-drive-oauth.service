@@ -1,0 +1,15 @@
+[Unit]
+Description=Google Drive consent listener for Zaeldryk VOD upload
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/zaeldryk
+Environment=ZAEL_ROOT=/home/ubuntu/zaeldryk
+ExecStart=/usr/bin/python3 -u /home/ubuntu/zaeldryk/tools/drive-oauth-remote.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
