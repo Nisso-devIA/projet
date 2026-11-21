@@ -102,12 +102,12 @@ def _clean_login(value: str) -> str:
     return login
 
 
-def manual_override(moment: datetime, env: dict | None = None) -> tuple[str | None, bool]:
-    """Cible du jour, sans Discord.
+RAID_WEEKDAYS = {0, 2, 4, 5}
+DAY_NAMES = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 
-    Retourne (login ou None, mode manuel). Une date future ne lance pas de raid
-    et ne lit pas Discord. Une date passée est ignorée : le planning reprend.
-    """
+
+def scheduled_login(moment: datetime, env: dict | None = None) -> str | None:
+    """Cible seulement si RTF_RAID_TARGET_DATE est exactement ce jour-là."""
     values = env if env is not None else load_env(RAID_ENV)
     login = _clean_login(values.get("RTF_RAID_TARGET", ""))
     day = (values.get("RTF_RAID_TARGET_DATE") or "").strip()
@@ -115,17 +115,26 @@ def manual_override(moment: datetime, env: dict | None = None) -> tuple[str | No
         data = json.loads(TARGET_PATH.read_text(encoding="utf-8"))
         login = _clean_login(str(data.get("login") or ""))
         day = str(data.get("date") or "").strip()
-    if not login:
-        return None, False
-    if day != moment.date().isoformat():
-        try:
-            configured = datetime.fromisoformat(day).date()
-        except ValueError:
-            return None, True
-        if configured < moment.date():
-            return None, False
-        return None, True
-    return login, True
+    if login and day == moment.date().isoformat():
+        return login
+    return None
+
+
+def raid_refusal(moment: datetime, env: dict | None = None) -> str | None:
+    """None si le raid du soir est autorisé. Sinon la ligne de journal, sans POST."""
+    if moment.weekday() not in RAID_WEEKDAYS:
+        return f"{DAY_NAMES[moment.weekday()]} : jour sans raid, aucun raid"
+    if not scheduled_login(moment, env):
+        return "pas sur le planning, aucun raid"
+    return None
+
+
+def manual_override(moment: datetime, env: dict | None = None) -> tuple[str | None, bool]:
+    """Cible du jour. Sans entrée datée du jour, aucun raid et aucune lecture Discord."""
+    login = scheduled_login(moment, env)
+    if login:
+        return login, True
+    return None, True
 
 
 def is_house(login: str) -> bool:
@@ -639,6 +648,10 @@ def confirm_outgoing_raid(to_id: str) -> bool:
 
 def fire(token: str, forced_dry: bool = False) -> int:
     now = datetime.now(PARIS)
+    refusal = raid_refusal(now)
+    if refusal:
+        log(refusal)
+        return 0
     if not forced_dry and STATE_PATH.exists():
         try:
             saved = json.loads(STATE_PATH.read_text(encoding="utf-8"))
@@ -725,6 +738,10 @@ def main() -> int:
     args = parser.parse_args()
     now = datetime.now(PARIS)
     if not args.dry_run and args.prepare and not args.fire and not due("prepare", now):
+        return 0
+    refusal = raid_refusal(now)
+    if refusal:
+        log(refusal)
         return 0
     preview, _preview_manual = manual_override(now)
     if args.fire and not args.dry_run:
