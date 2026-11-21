@@ -9,6 +9,7 @@ from replay import (
     fallback_chapters,
     game_label,
     journal_done,
+    keep_planned_game,
     parse_duration,
     select_evening_vod,
     title_for,
@@ -47,13 +48,17 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(chapters[0], (0, "Début du live"))
         self.assertTrue(all(chapters[i][0] + 10 <= chapters[i + 1][0] for i in range(len(chapters) - 1)))
         title = title_for(game_label("Hey Listen"), datetime(2026, 11, 16, 23, 38, tzinfo=PARIS))
-        self.assertEqual(title, "Rediffusion live – Zelda Ocarina of Time – 16/11/2026")
+        self.assertEqual(title, "Rediffusion live – Ocarina of Time remake – 16/11/2026")
         self.assertEqual(
             game_label("Hey Listen", "The Legend of Zelda: Ocarina of Time"),
-            "Zelda Ocarina of Time",
+            "Ocarina of Time remake",
         )
         self.assertEqual(game_label("Hey Listen", "Super Mario Odyssey"), "Super Mario Odyssey")
-        self.assertEqual(game_label("", "Just Chatting"), "Zelda Ocarina of Time")
+        self.assertEqual(game_label("", "Just Chatting"), "Ocarina of Time remake")
+        self.assertEqual(
+            keep_planned_game("Ocarina of Time remake", "Echoes of Wisdom"),
+            "Ocarina of Time remake",
+        )
         text = description_for(chapters)
         self.assertIn("https://www.twitch.tv/zaeldryk", text)
         self.assertIn("https://discord.gg/3vH2u7pme5", text)
@@ -61,7 +66,7 @@ class ReplayTests(unittest.TestCase):
         message = discord_text("Aventure", chapters, "https://www.youtube.com/watch?v=abc")
         self.assertTrue(message.startswith("@everyone"))
         self.assertIn("Sur la route", message)
-        self.assertEqual(game_label("balade Ocarina"), "Zelda Ocarina of Time")
+        self.assertEqual(game_label("balade Ocarina"), "Ocarina of Time remake")
 
     def test_journal_skips_a_known_upload(self):
         data = {"vods": {"1": {"youtube_id": "abc", "status": "posted"}}}
